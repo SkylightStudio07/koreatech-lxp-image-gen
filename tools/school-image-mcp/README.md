@@ -33,7 +33,9 @@ node scripts/install-project.js "$projectDir"
 
 ## 2. Chrome 연결
 
-서버 폴더의 PowerShell에서 브리지를 시작하고 실행 상태로 둡니다.
+저장소를 받은 뒤 `tools\school-image-mcp\connect-school-image.bat`을 실행하면 브리지가 없을 때 별도 창에서 시작하고 현재 연결 코드를 클립보드에 복사한 다음 학교 채팅 페이지를 엽니다. 첫 사용 때 Chrome 북마크 URL에 붙여 넣어 저장하세요. 이후에는 학교 채팅 탭에서 저장한 북마크를 누르면 됩니다. 이 동작은 브라우저 보안상 사용자 클릭이 필요하며 배치 파일만으로 탭 안에 워커를 자동 주입할 수는 없습니다.
+
+수동으로 하려면 서버 폴더의 PowerShell에서 브리지를 시작하고 실행 상태로 둡니다.
 
 ```powershell
 node src/broker.js
@@ -79,8 +81,6 @@ claude
 > /school-image 학교 AI로 흰 배경의 파란 크리스탈 아이콘 1장을 생성해서 crystal-blue-v1.png로 저장해 줘. 프로젝트 아트 지침을 반영하고 저장된 이미지를 확인해 줘.
 
 처음에는 `get_remaining_quota`나 `list_models`로 연결을 확인한 뒤 이미지를 생성하세요. **스킬 설치, MCP 승인, Chrome 연결은 각각 별개입니다.** 스킬은 제작 판단을 안내하고 MCP가 실제 요청과 저장을 수행합니다. PNG 저장 이후의 Unity Sprite 설정·임포트는 별도 요청과 프로젝트 작업 지침을 따릅니다.
-
-현재 Project-Vertex에는 MCP 등록이 되어 있으며 Claude Code에서 Pending approval을 확인했습니다. 전체 경로의 라이브 생성 검증은 Chrome 권한 및 Claude 승인 후 수행해야 합니다.
 
 ## 도구
 
@@ -133,7 +133,7 @@ npm.cmd run smoke -- --live --generate --reference
 
 `.local/connection.json`은 학교 인증정보가 아닌 임시 localhost 클라이언트 키입니다. `.local`, `artifacts`, `.env`, 조사용 다운로드 파일, `node_modules`는 Git에서 제외했습니다. 이 디렉터리를 다른 사용자와 공유하지 마세요.
 
-최종 검증 시 Chrome local-network-access 상태는 `prompt`였습니다. localhost 연결 권한 허용과 Claude Code 프로젝트 MCP 승인이 끝나야 실제 Claude → 브라우저 → 학교 API의 전체 경로를 사용할 수 있습니다. 브리지는 준비되어 있으나 해당 전체 경로의 라이브 생성 테스트는 아직 완료되지 않았습니다.
+Chrome 로컬 네트워크 접근 허용과 Claude Code 프로젝트 MCP 승인은 서로 다른 설정입니다. 연결 진단은 브라우저 워커가 브리지에 연결됐는지만 확인하며, Claude Code가 MCP 서버를 승인했는지까지 확인하지는 않습니다.
 
 API 조사와 실제 검증 내역은 `../../docs/school-ai-api-notes.md`에 기록합니다.
 
