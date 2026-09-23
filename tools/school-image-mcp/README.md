@@ -1,196 +1,220 @@
-# school-image-mcp
+# School Image MCP
 
-KOREATECH 로그인 세션으로 이미지를 생성해 로컬 프로젝트에 PNG로 저장하는 Claude Code용 MCP 서버입니다. Node.js 22 이상이 필요합니다.
+KOREATECH 학교 AI의 로그인 세션으로 이미지를 생성하고 Claude Code 프로젝트에 PNG로 저장하는 로컬 MCP입니다. Chrome 확장 프로그램이 학교 채팅 탭에 워커를 자동 연결하므로 북마크를 누를 필요가 없습니다.
 
-## 현재 구성
+## 사용 흐름
 
-- MCP stdio: 공식 `@modelcontextprotocol/sdk` 사용, 5개 도구 제공.
-- 기본 인증: 로그인된 Chrome 학교 탭의 쿠키를 그대로 사용합니다. 학교 쿠키·CSRF는 브라우저 밖으로 보내거나 디스크에 저장하지 않습니다.
-- localhost 브리지: `127.0.0.1:18765`에만 바인딩합니다. 학교 origin만 CORS 허용, MCP 클라이언트와 브라우저 작업자 키를 분리합니다.
-- 직접 HTTP 모드도 지원하지만 쿠키/CSRF를 사용자가 환경변수로 제공해야 합니다. Chrome 세션을 읽어 자동 추출하는 기능은 없습니다.
+```text
+Claude Code → 로컬 MCP → 127.0.0.1 브리지 → Chrome 확장 → 로그인된 학교 AI 탭
+```
 
-## 처음 설정부터 이미지 생성까지
+학교 쿠키와 CSRF 값은 Chrome 밖으로 복사하거나 디스크에 저장하지 않습니다. 브리지는 `127.0.0.1`에만 열리고, 학교 API 요청은 로그인된 탭에서 실행됩니다.
 
-아래는 Windows에서 처음 연결하는 순서입니다. Claude Code, Chrome, Node.js 22 이상이 필요합니다.
+## 준비물
 
-### A. 저장소와 프로젝트를 한 번 연결하기
+- Windows 10/11
+- Node.js 22 이상
+- Google Chrome
+- KOREATECH 학교 AI 계정
+- Claude Code CLI 또는 VS Code 확장
 
-PowerShell에서 저장소를 내려받고 의존성을 설치합니다. 프로젝트 경로를 실제 Claude Code 프로젝트 경로로 바꾸세요.
+## 최초 설정
+
+### 1. 저장소 설치
+
+PowerShell에서 저장소를 내려받고 의존성을 설치합니다.
 
 ```powershell
 git clone https://github.com/SkylightStudio07/koreatech-lxp-image-gen.git
-$repoDir = Join-Path $PWD 'koreatech-lxp-image-gen'
-$bridgeDir = Join-Path $repoDir 'tools\school-image-mcp'
+Set-Location .\koreatech-lxp-image-gen\tools\school-image-mcp
+npm.cmd ci
+```
+
+### 2. Chrome 확장 프로그램 설치
+
+`install-chrome-extension.bat`을 더블클릭합니다. 스크립트가 확장 파일을 만들고, 확장 폴더와 `chrome://extensions`를 엽니다.
+
+Chrome에서 한 번만 다음 작업을 합니다.
+
+1. 오른쪽 위 **개발자 모드**를 켭니다.
+2. **압축해제된 확장 프로그램을 로드합니다**를 누릅니다.
+3. 탐색기에 열린 `tools\school-image-mcp\extension` 폴더를 선택합니다.
+4. `KOREATECH School Image MCP Connector`가 켜져 있는지 확인합니다.
+5. 자주 상태를 확인하려면 Chrome 확장 메뉴에서 고정합니다.
+
+개발자 모드 확장 설치는 Chrome 보안 정책상 스크립트가 대신 승인할 수 없습니다. 이 선택만 한 번 직접 하면 이후에는 탭을 열거나 F5로 새로고침해도 자동으로 연결됩니다.
+
+확장 프로그램이 요구하는 접근 범위는 다음 두 곳뿐입니다.
+
+- `https://ai.koreatech.ac.kr/*`: 로그인된 학교 탭에 워커 실행
+- `http://127.0.0.1/*`: 이 PC의 로컬 브리지 상태 확인
+
+### 3. Claude Code 프로젝트 등록
+
+MCP를 사용할 프로젝트 경로를 넣어 설치 스크립트를 실행합니다.
+
+```powershell
 $projectDir = 'C:\Users\YOUR_NAME\Documents\Project-Vertex'
-Set-Location -LiteralPath $bridgeDir
-npm.cmd ci
 node scripts/install-project.js "$projectDir"
 ```
 
-이 명령은 프로젝트에 `.mcp.json`, `.claude\skills\school-image\SKILL.md`, `GeneratedAssets\SchoolAI`를 만듭니다. 기존 MCP 설정을 보존합니다. **저장소를 이동하면** MCP 설정에 저장된 절대 경로가 바뀌므로 설치 명령을 새 위치에서 다시 실행하세요.
+설치 결과:
 
-### B. Chrome 연결 북마크를 한 번 만들기
+- `$projectDir\.mcp.json`: `school-image` MCP 서버 등록
+- `$projectDir\.claude\skills\school-image\SKILL.md`: 이미지 제작 스킬
+- `$projectDir\GeneratedAssets\SchoolAI`: 기본 PNG 출력 폴더
 
-1. `tools\school-image-mcp\connect-school-image.bat`을 더블클릭합니다. 브리지가 없으면 별도 터미널 창에서 켜고 연결 코드를 클립보드에 복사한 뒤 학교 채팅을 엽니다.
-2. Chrome에서 [학교 AI 채팅](https://ai.koreatech.ac.kr/AiCA/chat)에 로그인합니다.
-3. 북마크바가 안 보이면 `Ctrl+Shift+B`를 누릅니다. 북마크바를 우클릭해 **페이지 추가**를 선택합니다.
-4. 이름을 `KOREATECH AI 연결`로 적고 URL 칸에 복사된 코드를 붙여 넣어 저장합니다. URL이 `javascript:`로 시작하는지 확인하세요. **주소창에 붙여 넣으면 안 됩니다.**
-5. 학교 채팅 탭에서 새 북마크를 클릭합니다. Chrome이 로컬 네트워크 접근을 묻는 경우 허용합니다.
+기존의 다른 MCP 설정은 보존합니다. 같은 이름의 서버나 내용이 다른 스킬이 이미 있으면 덮어쓰지 않고 중단합니다. 이 저장소를 다른 폴더로 옮겼다면 절대 경로가 바뀌므로 설치 명령을 새 위치에서 다시 실행합니다.
 
-북마크 코드는 로그인 정보가 아니라 탭 안에서 워커를 시작하는 코드입니다. 브라우저 보안 때문에 배치 파일이 대신 북마크를 누르지는 못합니다. 연결 코드는 워커 코드를 포함하므로 저장소 업데이트로 워커 동작이 바뀌면 북마크 URL도 한 번 갱신해야 합니다. 기존 북마크를 편집해 새로 복사된 URL로 바꾸세요.
+### 4. Claude Code 승인
 
-### C. Claude Code에서 승인하고 이미지 만들기
+설치한 프로젝트 루트를 Claude Code에서 엽니다. `.mcp.json`의 `school-image` 서버를 허용하라는 안내가 나오면 승인하고 새 세션을 시작합니다.
 
-1. Claude Code에서 위에서 설정한 `$projectDir` 폴더를 엽니다.
-2. `school-image` MCP 서버를 허용하라는 확인이 나오면 승인하고 새 세션을 시작합니다. 이 승인은 Chrome의 로컬 네트워크 권한과 별개입니다.
-3. Claude Code에 아래처럼 요청합니다.
-
-```text
-/school-image 학교 AI로 흰 배경의 파란 크리스탈 아이콘 1장을 생성해 줘.
-중앙에 단독 배치하고 글자는 넣지 마. GeneratedAssets/SchoolAI/crystal-blue-v1.png로 저장하고 결과를 확인해 줘.
-```
-
-PNG는 프로젝트의 `GeneratedAssets\SchoolAI`에 저장됩니다. 생성 요청은 학교 계정의 할당량을 사용합니다. PNG 저장은 Unity 임포트나 씬 연결을 자동으로 하지 않습니다.
-
-### 다음부터 매번 사용할 때
-
-1. 학교 계정이 Chrome에서 로그인 상태인지 확인합니다.
-2. `connect-school-image.bat`을 실행합니다. 브리지가 이미 켜져 있으면 기존 브리지를 사용하고, 학교 채팅 페이지를 엽니다.
-3. 학교 채팅 탭에서 저장해 둔 `KOREATECH AI 연결` 북마크를 클릭합니다. 탭을 새로고침하거나 닫았다면 다시 눌러야 합니다.
-4. Claude Code에서 프로젝트를 열고 이미지 요청을 합니다.
-
-정상 연결 여부는 MCP 폴더에서 `npm.cmd run doctor`로 확인합니다. `{"broker":true,"connected":true,"pending":0}`이면 준비됐습니다. 일시적인 브리지 오류는 워커가 자동 재연결을 시도하므로 `connected:false`가 보이면 20초 정도 기다린 뒤 다시 확인하세요. 그래도 false이거나 탭을 새로고침했다면 학교 채팅 탭에서 북마크를 다시 누르고 Chrome 로컬 네트워크 권한을 확인합니다. 생성 작업 중에도 별도 주기 신호로 연결을 유지합니다. 브리지를 종료하려면 브리지 터미널에서 `Ctrl+C`를 누릅니다.
-
-## 1. 설치 및 프로젝트 등록
-
-필요한 것: Node.js 22 이상, Chrome의 학교 AI 로그인, Claude Code. 저장소를 내려받은 뒤 PowerShell에서 실행합니다. 아래 두 경로를 자신의 위치로 바꾸세요.
+CLI를 사용하는 경우:
 
 ```powershell
-$bridgeDir = 'C:\path\to\repository\tools\school-image-mcp'
-$projectDir = 'C:\path\to\Project-Vertex'
-Set-Location -LiteralPath $bridgeDir
-npm.cmd ci
-node scripts/install-project.js "$projectDir"
-```
-
-설치 스크립트는 다음을 만듭니다.
-
-- 프로젝트 `.mcp.json`의 `school-image` 서버 항목: 현재 Node 실행 파일과 이 저장소의 서버 경로 사용.
-- 프로젝트 `.claude/skills/school-image/SKILL.md`: Claude Code가 읽을 이미지 제작 스킬.
-- 프로젝트 `GeneratedAssets/SchoolAI`: 기본 이미지 출력 폴더.
-
-참조 루트는 프로젝트 폴더입니다. 기존 다른 MCP 설정은 보존하고, 이름이 같은 서버 설정이나 스킬이 다른 내용이면 덮어쓰지 않고 중단합니다. 동일 내용으로 재실행할 수 있습니다. **저장소를 이동하면 등록 경로도 다시 검토해야 합니다.** 서버 코드를 프로젝트로 복제하지 않습니다.
-
-출력·참조 범위를 바꾸려면 생성된 `.mcp.json`의 `ALLOWED_OUTPUT_ROOT`, `ALLOWED_REFERENCE_ROOT`를 수정하세요. 참조 이미지는 학교 서버에 업로드됩니다. 설치된 스킬의 원본은 [`skills/school-image/SKILL.md`](skills/school-image/SKILL.md)입니다. 원본을 수정한 후에는 프로젝트에 설치된 복사본과 차이를 검토해 갱신하세요.
-
-## 2. Chrome 연결
-
-저장소를 받은 뒤 `tools\school-image-mcp\connect-school-image.bat`을 실행하면 브리지가 없을 때 별도 창에서 시작하고 현재 연결 코드를 클립보드에 복사한 다음 학교 채팅 페이지를 엽니다. 첫 사용 때 Chrome 북마크 URL에 붙여 넣어 저장하세요. 이후에는 학교 채팅 탭에서 저장한 북마크를 누르면 됩니다. 이 동작은 브라우저 보안상 사용자 클릭이 필요하며 배치 파일만으로 탭 안에 워커를 자동 주입할 수는 없습니다.
-
-수동으로 하려면 서버 폴더의 PowerShell에서 브리지를 시작하고 실행 상태로 둡니다.
-
-```powershell
-node src/broker.js
-```
-
-다른 PowerShell에서 같은 서버 폴더로 이동해 연결 코드를 복사합니다.
-
-```powershell
-.\copy-connect.ps1
-```
-
-PowerShell 정책 때문에 스크립트가 실행되지 않으면 다음 명령으로도 복사할 수 있습니다.
-
-```powershell
-Get-Content -LiteralPath '.local/connect-bookmarklet.txt' -Raw | Set-Clipboard
-```
-
-Chrome 북마크를 하나 만들고 URL에 복사한 전체 코드를 붙여 넣습니다. [학교 채팅](https://ai.koreatech.ac.kr/AiCA/chat)에 로그인한 상태에서 그 북마크를 누르세요. 이 북마클릿은 이 저장소가 생성한 로컬 연결 코드이며 로그인 정보를 포함하지 않습니다. 주소창에 직접 붙여 넣을 경우 Chrome이 `javascript:` 접두어를 제거할 수 있으므로 북마크 방식이 편합니다.
-
-Chrome이 **로컬 네트워크 접근**을 요청하면 허용해야 합니다. 사이트의 연결 대상은 이 PC의 `127.0.0.1:18765` 브리지입니다. 학교 탭을 열린 상태로 두세요. 탭을 새로고침하거나 닫은 경우에는 연결 북마크를 다시 눌러야 합니다. 최신 북마크의 워커는 브리지 재시작 후 자동으로 다시 연결합니다. 상태 확인:
-
-```powershell
-npm.cmd run doctor
-```
-
-정상 연결 시 `broker: true`, `connected: true`입니다. `broker: false`면 브리지 실행 여부를, `connected: false`가 20초 이상 지속되면 학교 탭·연결 북마크·Chrome 권한을 확인하세요. 새 워커 코드를 받았다면 기존 북마크 URL도 갱신해야 합니다.
-
-연결 코드는 학교 페이지에 `window.__schoolImageWorker`와 작업 대기 루프를 추가합니다. 탭을 닫으면 멈춥니다. 브리지는 실행한 터미널에서 Ctrl+C로 종료합니다. 쿠키를 파일로 추출하거나 Chrome의 보안 설정을 자동 변경하지 않습니다.
-
-## 3. Claude Code 연결 및 스킬 사용
-
-설정한 프로젝트를 Claude Code에서 열고 `school-image` 프로젝트 MCP 설정을 승인하세요. CLI라면 프로젝트 폴더에서:
-
-```powershell
+Set-Location -LiteralPath $projectDir
 claude mcp get school-image
 claude
 ```
 
-`claude` 명령이 PATH에 없으면 평소 사용하는 VS Code Claude Code 패널에서 프로젝트를 여세요. MCP 승인 후 클라이언트가 도구를 다시 불러오도록 새 세션을 시작합니다. 연결된 도구 목록에서 아래 5개 도구를 확인하세요.
+Chrome 확장의 권한 승인과 Claude Code의 MCP 승인은 서로 다른 설정입니다.
 
-스킬은 `.claude/skills/school-image/SKILL.md`에서 발견되며 `/school-image`로 호출하거나 자연어로 요청할 수 있습니다.
+## 매일 사용할 때
 
-> /school-image 학교 AI로 흰 배경의 파란 크리스탈 아이콘 1장을 생성해서 crystal-blue-v1.png로 저장해 줘. 프로젝트 아트 지침을 반영하고 저장된 이미지를 확인해 줘.
+1. `start-school-image.bat`을 더블클릭합니다.
+2. 로컬 브리지가 백그라운드에서 시작되고 Chrome 학교 채팅이 열립니다.
+3. 로그인이 풀렸다면 학교 계정으로 로그인합니다.
+4. Chrome 확장 아이콘에 녹색 `ON`이 표시되면 Claude Code에서 이미지를 요청합니다.
 
-처음에는 `get_remaining_quota`나 `list_models`로 연결을 확인한 뒤 이미지를 생성하세요. **스킬 설치, MCP 승인, Chrome 연결은 각각 별개입니다.** 스킬은 제작 판단을 안내하고 MCP가 실제 요청과 저장을 수행합니다. PNG 저장 이후의 Unity Sprite 설정·임포트는 별도 요청과 프로젝트 작업 지침을 따릅니다.
+브리지가 이미 실행 중이면 중복으로 실행하지 않습니다. 학교 탭을 열거나 F5로 새로고침하면 확장이 워커를 다시 넣습니다. 잠깐 통신이 끊겨도 워커가 자동 재연결을 시도합니다.
 
-## 도구
+작업이 끝난 뒤 브리지를 끄려면 `stop-school-image.bat`을 실행합니다. 켜 둬도 외부 네트워크에 포트를 열지 않으며, 다음 실행에서는 기존 브리지를 재사용합니다.
+
+기존 `connect-school-image.bat`도 호환을 위해 남아 있으며 `start-school-image.bat`과 같은 동작을 합니다.
+
+## 확장 아이콘 상태
+
+| 표시 | 의미 | 할 일 |
+|---|---|---|
+| `ON` | 브리지·학교 탭·워커 연결 완료 | Claude Code에서 바로 사용 |
+| `…` | 학교 탭을 찾았고 연결 중 | 잠시 기다리거나 팝업의 **지금 다시 연결** 클릭 |
+| `!` | 로컬 브리지가 꺼짐 | `start-school-image.bat` 실행 |
+| `—` | 학교 채팅 탭이 없음 | 팝업의 **학교 채팅 열기** 클릭 |
+
+확장 팝업은 브리지, 학교 채팅 탭, 자동 워커 상태를 각각 보여줍니다. 기본 포트는 `18765`이며, 브리지 포트를 직접 바꾼 경우에만 고급 설정의 포트도 같은 값으로 바꿉니다.
+
+터미널에서 확인하려면 MCP 폴더에서 실행합니다.
+
+```powershell
+npm.cmd run doctor
+```
+
+정상 예시:
+
+```json
+{"broker":true,"connected":true,"pending":0}
+```
+
+## Claude Code 요청 예시
+
+스킬을 직접 호출하거나 자연어로 요청할 수 있습니다.
+
+```text
+/school-image 학교 AI로 흰 배경의 파란 크리스탈 아이콘 1장을 생성해 줘.
+중앙에 단독 배치하고 글자는 넣지 마. crystal-blue-v1.png로 저장한 뒤 결과를 확인해 줘.
+```
+
+먼저 연결만 확인하려면 다음처럼 요청합니다.
+
+```text
+학교 이미지 MCP의 남은 할당량을 확인해 줘.
+```
+
+상대 `output_path`는 프로젝트 등록 시 설정된 `GeneratedAssets\SchoolAI` 아래로 해석됩니다. 이미지 생성은 학교 계정 할당량을 사용합니다. PNG 저장은 Unity Sprite 임포트나 장면 연결까지 자동으로 수행하지 않습니다.
+
+## 문제 해결
+
+### 확장 아이콘이 `!`로 표시됨
+
+`start-school-image.bat`을 실행합니다. 계속 꺼짐으로 보이면 `.local\broker.log`를 확인하고 Node.js 22 이상이 설치됐는지 확인합니다.
+
+### 학교 탭이 열렸는데 `…`에서 멈춤
+
+1. 주소가 `https://ai.koreatech.ac.kr/AiCA/chat` 아래인지 확인합니다.
+2. 학교 사이트의 Chrome 권한에서 로컬 네트워크 접근을 허용합니다.
+3. 확장 팝업에서 **지금 다시 연결**을 누릅니다.
+4. `chrome://extensions`에서 확장이 켜져 있는지 확인합니다.
+
+### 로그인 후에도 연결되지 않음
+
+로그인 여부와 워커 연결은 별개입니다. 확장이 켜져 있다면 로그인 완료 후 자동으로 워커를 넣습니다. 팝업에서 세 항목 중 어떤 항목이 꺼졌는지 확인하면 원인을 구분할 수 있습니다.
+
+### 저장소 업데이트 후 확장 변경이 적용되지 않음
+
+`install-chrome-extension.bat`을 다시 실행해 `worker-main.js`를 빌드하고, `chrome://extensions`의 해당 확장에서 새로고침 아이콘을 한 번 누릅니다. 브리지 코드도 바뀌었다면 `stop-school-image.bat` 후 `start-school-image.bat`을 실행합니다.
+
+북마크 방식 버전에서 처음 업그레이드하며 `An older bridge is still running`이 나오면 예전 브리지 터미널에서 `Ctrl+C`를 누르거나 그 창을 닫은 뒤 `start-school-image.bat`을 다시 실행합니다.
+
+### Claude Code에 도구가 나타나지 않음
+
+프로젝트 루트의 `.mcp.json`을 확인하고 Claude Code에서 프로젝트 MCP를 승인합니다. 승인 후 새 세션을 시작합니다. Chrome 연결이 정상이어도 MCP 승인이 없으면 도구는 표시되지 않습니다.
+
+## 제공 도구
 
 | 도구 | 주요 입력 |
 |---|---|
 | `generate_image` | `prompt`, `output_path`, 선택: `reference_images`, `conversation_id`, `locale`, `overwrite` |
-| `generate_image_with_context` | `art_direction`, `task`, 위와 같은 출력/참조 옵션 |
+| `generate_image_with_context` | `art_direction`, `task`, 위와 같은 출력·참조 옵션 |
 | `download_attachment` | `file_id`, `output_path`, 선택: `overwrite` |
 | `get_remaining_quota` | 없음 |
 | `list_models` | 없음 |
 
-```json
-{
-  "prompt": "Create a blue geometric crystal UI icon on a white background.",
-  "output_path": "crystal.png",
-  "reference_images": [],
-  "overwrite": false
-}
-```
+출력 경로는 등록된 출력 루트 안으로 제한됩니다. `..`, 루트 밖 경로, 심볼릭 링크·정션, Windows ADS, 하드 링크 덮어쓰기를 거부합니다. 기존 파일은 `overwrite: true`일 때만 바꿉니다.
 
-`output_path`는 출력 루트 기준 상대 경로 또는 그 안의 절대 경로입니다. `..`, 루트 밖 경로, 심볼릭 링크/정션, Windows ADS, 하드 링크 덮어쓰기는 거부합니다. PNG 서명을 검사하며 기존 파일은 `overwrite: true`일 때만 대체합니다. 여러 이미지가 반환되면 첫 번째를 저장하고 나머지 file ID를 반환합니다.
+참조 이미지는 PNG, JPEG, WebP 형식으로 최대 4개, 파일당 20 MiB까지 프로젝트 참조 루트 안에서 지정할 수 있습니다. 파일은 학교 서버에 업로드됩니다. 업로드와 요청 전달은 검증했지만 학교 서버가 테스트 편집 요청을 일반 채팅으로 처리해 참조 기반 이미지 생성 성공은 아직 확인하지 못했습니다.
 
-`generate_image_with_context`는 두 텍스트를 제목과 함께 연결할 뿐 아트 디렉션을 재작성하지 않습니다. 요청 모델은 관찰된 `gpt-5.6-sol`이고 서버가 실제 이미지 모델로 라우팅합니다.
+## 오류와 재시도
 
-**참조 생성의 실제 제한:** 업로드와 completion payload는 실제 Network로 검증했지만 학교 서버가 테스트 편집 요청 2건을 일반 채팅으로 처리하여 새 이미지를 반환하지 않았습니다. 따라서 참조 업로드 구현은 완료됐으나 참조 기반 이미지 생성 성공은 검증되지 않았습니다. 이런 경우 `NO_ATTACHMENT`로 반환하며 자동 재요청하지 않습니다.
+`AUTH_EXPIRED`, `CSRF_INVALID`, `QUOTA_EXHAUSTED`, `GENERATION_FAILED`, `NO_ATTACHMENT`, `DOWNLOAD_FAILED`, `UPLOAD_FAILED`, `INVALID_OUTPUT_PATH`, `NETWORK_ERROR`, `BROWSER_OFFLINE`, `BRIDGE_BUSY`, `OUTPUT_EXISTS`, `INVALID_REQUEST`를 구분합니다.
 
-## 오류와 세션
+생성 요청은 자동으로 다시 보내지 않습니다. 네트워크 오류가 발생해도 학교 서버에서 생성이 진행됐을 수 있기 때문입니다. 학교 UI에서 완료 여부를 확인한 뒤 다시 요청합니다. 중간 응답에서 대화와 메시지 ID를 확보했다면 MCP가 해당 대화를 한 번 조회해 결과 복구를 시도합니다.
 
-`AUTH_EXPIRED`, `CSRF_INVALID`, `QUOTA_EXHAUSTED`, `GENERATION_FAILED`, `NO_ATTACHMENT`, `DOWNLOAD_FAILED`, `UPLOAD_FAILED`, `INVALID_OUTPUT_PATH`, `NETWORK_ERROR`를 구분합니다. 추가로 `BROWSER_OFFLINE`, `BRIDGE_BUSY`, `OUTPUT_EXISTS`, `INVALID_REQUEST`가 있습니다. 403의 세부 원인은 서버 정책 거부일 수도 있으므로 CSRF만 원인이라고 단정하면 안 됩니다.
+## 개발과 검증
 
-학교 세션 만료 시 LXP/학교 UI에서 다시 로그인하고 연결 북마크를 실행하세요. 비밀번호 자동 로그인은 하지 않습니다. 관찰된 학교 프론트엔드는 `/auth/refresh`를 사용하지만 이 MCP는 로그인 수명을 자체적으로 연장하지 않습니다.
-
-생성 요청을 자동 재시도하지 않습니다. 중간 SSE에서 대화/메시지 ID를 받은 경우 응답이 불완전하면 대화 조회로 한 번 복구를 시도합니다. 과거 이미지나 여러 후보 중 임의의 결과를 반환하지 않습니다. 요청 전에 네트워크가 끊겨 ID를 받지 못했거나 생성이 계속 진행 중이면 복구가 실패할 수 있습니다. 학교 UI에서 생성 완료 여부를 확인한 후 다시 요청하세요.
-
-## 직접 HTTP 모드
-
-`SCHOOL_AI_TRANSPORT=direct`, `SCHOOL_AI_COOKIE`, `SCHOOL_AI_CSRF_TOKEN`을 프로세스 환경에 제공하면 브라우저 브리지 없이 작동합니다. 실제 값을 명령 기록, 소스, `.mcp.json`, `.env.example`, Git에 넣지 마세요. 이 모드는 코드만 제공되며 실제 로그인 쿠키를 추출하여 테스트하지 않았습니다.
-
-## 검증
+확장 워커는 `src/browser-worker.js`에서 생성됩니다. 이 파일을 바꾼 뒤 확장 산출물을 다시 만듭니다.
 
 ```powershell
+npm.cmd run build:extension
 npm.cmd test
 npm.cmd run test:bridge
+npm.cmd run test:launcher
 npm.cmd run smoke
+```
+
+실제 학교 세션까지 확인:
+
+```powershell
 npm.cmd run doctor
 npm.cmd run smoke -- --live
-# 아래는 실제 할당량을 사용해 이미지 2장을 생성합니다.
+```
+
+아래 명령은 실제 할당량을 사용합니다.
+
+```powershell
 npm.cmd run smoke -- --live --generate --reference
 ```
 
-`.local/connection.json`은 학교 인증정보가 아닌 임시 localhost 클라이언트 키입니다. `.local`, `artifacts`, `.env`, 조사용 다운로드 파일, `node_modules`는 Git에서 제외했습니다. 이 디렉터리를 다른 사용자와 공유하지 마세요.
+확장 구조는 `background.js`가 탭 수명주기와 상태를 담당하고, 생성된 `worker-main.js`가 학교 페이지의 메인 실행 환경에서 API 요청을 담당하도록 나뉩니다. 팝업과 포트 설정은 워커와 분리되어 있어 이후 여러 학교 서비스, 다른 브리지 프로필, 자동 업데이트 배포를 추가하기 쉽습니다.
 
-Chrome 로컬 네트워크 접근 허용과 Claude Code 프로젝트 MCP 승인은 서로 다른 설정입니다. 연결 진단은 브라우저 워커가 브리지에 연결됐는지만 확인하며, Claude Code가 MCP 서버를 승인했는지까지 확인하지는 않습니다.
+## 직접 HTTP 모드와 레거시 북마크
 
-API 조사와 실제 검증 내역은 `../../docs/school-ai-api-notes.md`에 기록합니다.
+브라우저 확장을 사용할 수 없는 환경을 위해 기존 방식도 남겨 둡니다.
 
-## Git으로 공유
+- `copy-connect.ps1`: 레거시 북마클릿 복사
+- `start-bridge.ps1`: 콘솔에서 브리지 직접 실행
+- `SCHOOL_AI_TRANSPORT=direct`: 쿠키와 CSRF를 환경변수로 직접 제공하는 고급 모드
 
-저장할 파일은 `src`, `scripts`, `skills`, `test`, `package.json`, `package-lock.json`, README, PowerShell 실행 도우미, 값이 빈 `.env.example`입니다. 이 저장소의 `.gitignore`는 `.local`, `node_modules`, 생성 이미지, 실제 `.env`, 조사 캐시 및 루트의 PC 전용 `.mcp.json`을 제외합니다.
+직접 모드는 `SCHOOL_AI_COOKIE`, `SCHOOL_AI_CSRF_TOKEN`이 필요합니다. 실제 값을 소스, `.mcp.json`, `.env`, 명령 기록, Git에 넣지 마세요.
 
-각 PC에서 설치 명령을 실행해 로컬 절대 경로로 `.mcp.json`을 생성하세요. 설치 대상 프로젝트는 별도 저장소일 수 있으므로 그 프로젝트의 ignore 규칙도 확인하세요. 스킬 파일은 공유할 수 있지만 로컬 인증정보와 브리지 키를 공유하면 안 됩니다. 이 저장소는 아직 원격 저장소가 지정되지 않았으며 자동으로 push하지 않습니다.
+`.local`, 실제 `.env`, `node_modules`, 생성 이미지와 로컬 인증 상태는 Git에서 제외됩니다. `.local\connection.json`은 학교 인증정보가 아니라 임시 localhost 클라이언트 키이지만 공유하지 마세요.

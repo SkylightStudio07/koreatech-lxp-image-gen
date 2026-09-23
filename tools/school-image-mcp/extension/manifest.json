@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "KOREATECH School Image MCP Connector",
+  "version": "0.2.0",
+  "description": "Connects the logged-in KOREATECH AI chat tab to the local School Image MCP bridge.",
+  "minimum_chrome_version": "111",
+  "permissions": ["alarms", "scripting", "storage", "tabs"],
+  "host_permissions": [
+    "https://ai.koreatech.ac.kr/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "School Image MCP 연결 상태"
+  }
+}

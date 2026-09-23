@@ -1,5 +1,4 @@
-// Run only on the logged-in school origin. School cookies/CSRF never leave it.
-export async function browserWorker(port = 18765) {
+void (async function browserWorker(port = 18765) {
   if (location.origin !== 'https://ai.koreatech.ac.kr') throw new Error('Open the school chat first.');
   const previous = window.__schoolImageWorker;
   if (previous?.active && previous.port === port) return;
@@ -87,4 +86,4 @@ export async function browserWorker(port = 18765) {
   }
   state.active = false;
   state.connected = false;
-}
+})(window.__schoolImageConnectorPort || 18765);

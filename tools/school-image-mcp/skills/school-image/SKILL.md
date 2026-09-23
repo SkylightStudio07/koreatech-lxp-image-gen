@@ -37,7 +37,7 @@ Saving a PNG does not import it into Unity, configure a Sprite, set transparency
 
 ## Failure and quota handling
 
-- `BROWSER_OFFLINE`: the bridge must be running and the logged-in school tab connected. After a tab reload or broker restart, reconnect using the bookmarklet. Browser local-network permission and Claude MCP approval are separate setup steps.
+- `BROWSER_OFFLINE`: the bridge must be running and the logged-in school tab connected. The Chrome connector normally restores the worker after a tab reload or bridge restart. Ask the user to run `start-school-image.bat`, open the extension popup, and use **지금 다시 연결** if automatic recovery does not succeed. Chrome extension/site permission and Claude MCP approval are separate setup steps. The legacy bookmarklet is only a fallback.
 - `AUTH_EXPIRED` / `CSRF_INVALID`: direct the user to the normal school login/connection flow. A 403 can also mean a service policy refusal. Never extract or print credentials to work around a failure.
 - `NO_ATTACHMENT`: do not claim an image was produced. Reference upload and payload are verified, but two reference-edit tests returned ordinary chat with no image. Reference-based generation remains unverified; this is not proof it never works. Do not silently remove references or claim visual consistency.
 - `NETWORK_ERROR` / `GENERATION_FAILED`: the request may already have consumed quota. The server attempts a bounded conversation recovery when it has usable IDs. Check the school conversation or use a known returned attachment ID before considering another generation; do not automatically repeat uncertain requests.

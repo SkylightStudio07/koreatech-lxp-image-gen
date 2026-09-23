@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>School Image MCP</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="mark" aria-hidden="true">K</div>
+      <div><h1>School Image MCP</h1><p>학교 AI 연결 상태</p></div>
+    </header>
+    <section class="summary" aria-live="polite">
+      <span id="summaryDot" class="dot pending"></span>
+      <div><strong id="summaryTitle">상태 확인 중</strong><p id="summaryText">잠시만 기다려 주세요.</p></div>
+    </section>
+    <section class="checks">
+      <div><span id="bridgeDot" class="dot"></span><span>로컬 브리지</span><strong id="bridgeValue">확인 중</strong></div>
+      <div><span id="tabDot" class="dot"></span><span>학교 채팅 탭</span><strong id="tabValue">확인 중</strong></div>
+      <div><span id="workerDot" class="dot"></span><span>자동 워커</span><strong id="workerValue">확인 중</strong></div>
+    </section>
+    <div class="actions">
+      <button id="openChat" class="primary">학교 채팅 열기</button>
+      <button id="reconnect">지금 다시 연결</button>
+    </div>
+    <details>
+      <summary>고급 설정</summary>
+      <label for="port">브리지 포트</label>
+      <div class="port-row"><input id="port" type="number" min="1024" max="65535" inputmode="numeric"><button id="savePort">저장</button></div>
+      <p>기본값은 18765입니다. 브리지 설정을 바꾼 경우에만 수정하세요.</p>
+    </details>
+    <footer>페이지 새로고침 후에도 자동으로 다시 연결됩니다.</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
