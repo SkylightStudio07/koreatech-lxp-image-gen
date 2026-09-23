@@ -2,6 +2,7 @@
 
 - Version 0.6.0 adds read-only Notion tools, allowlisted Unity CLI tools, a loopback Unity Editor bridge template, and `.school-code/skills` loading. Version 0.5.0 adds Codex-style separated chat sessions and per-session approval modes. Version 0.4.0 made the connected project an on-demand workspace tool target with binary asset metadata, project instruction discovery (`AGENTS.md`, `CODEX.md`, `CLAUDE.md`), and an expanded MCP schema.
 - All 22 automated tests pass, including Notion pagination/error handling, Unity CLI path and target restrictions, Unity Editor bridge authentication, skill-root isolation, session migration/isolation, workspace metadata/instruction tools, attachment snapshots/limits, sensitive and binary file rejection, unsaved-file rejection, project switching, folder selection and the coordinator's actual outgoing chat payload.
+- `CLUB-SHARING.md` documents the token boundary and the current single-worker relay limitation. It does not contain real server URLs or credentials.
 
 - The existing browser, protocol, coordinator, connector and MCP round-trip checks remain covered by the test suite. The 0.6.0 package was rebuilt successfully as `school-code-0.6.0.vsix`.
 - Version 0.2.0 replaces the bookmarklet with a bundled Manifest V3 Chrome connector, based on the image connector at upstream commit b98345b. The two connectors use separate ports and worker names.
