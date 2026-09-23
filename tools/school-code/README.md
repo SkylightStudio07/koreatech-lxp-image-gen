@@ -1,10 +1,10 @@
-# KOREATECH School Code — 0.5.0 preview
+# KOREATECH School Code — 0.6.0 preview
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 개인용 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
 ## 설치와 채팅
 
-1. VS Code에 school-code-0.5.0.vsix를 설치합니다.
+1. VS Code에 school-code-0.6.0.vsix를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -95,6 +95,41 @@ SSE 전송 방식이 아니라 **HTTP**를 선택하세요. 이 서버는 statel
 
 > 사용자의 VS Code 프로젝트를 돕는 코딩 도우미입니다. 파일을 추측하지 말고 workspace_info, list_files, read_file, search_text로 확인합니다. 수정 전 read_file에서 최신 SHA-256을 받고 propose_edit의 expected_sha256에 전달합니다. propose_edit는 파일 전체 내용을 사용합니다. 사용자 승인 거절, 시간 초과, 오프라인이면 반복 호출하지 말고 이유를 알려 주세요. 비밀 파일을 요청하지 마세요.
 
+### Notion 읽기 전용
+
+Notion에서 Internal Integration을 만든 뒤 읽을 페이지와 데이터베이스를 해당 integration에 **공유**합니다. VS Code 명령 팔레트에서 **School Code: Notion 연결 설정**을 실행하고 integration secret을 입력하세요. 토큰은 VS Code SecretStorage에만 저장되며 NAS 중계 서버로 복사하지 않습니다. 해제는 **School Code: Notion 연결 해제**입니다.
+
+학교 에이전트에는 다음 읽기 전용 도구가 보입니다.
+
+- `notion_search`: 공유된 페이지 검색
+- `notion_fetch_page`: 페이지 제목·URL·수정 시각 조회
+- `notion_list_children`: 페이지/블록의 텍스트와 하위 블록 목록 조회
+
+Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 모드에 따라 승인되며, 페이지가 integration에 공유되지 않았거나 토큰이 없으면 명확한 오류를 반환합니다.
+
+### Unity CLI
+
+명령 팔레트의 **School Code: Unity CLI 경로 설정** 또는 `schoolCode.unityExecutable` 설정으로 Unity 실행 파일을 지정합니다. 에이전트가 사용할 수 있는 도구는 고정되어 있습니다.
+
+- `unity_project_info`: Unity 버전·Assets·패키지 수 확인
+- `unity_run_tests`: EditMode 또는 PlayMode 테스트 실행
+- `unity_build`: `StandaloneWindows64`, `StandaloneLinux64`, `StandaloneOSX`, `WebGL` 빌드
+- `unity_refresh_assets`: batch mode로 에셋 임포트/새로 고침
+
+임의 셸 명령과 임의 `-executeMethod`는 제공하지 않습니다. 빌드 출력 경로는 연결된 프로젝트 안의 상대 경로만 허용합니다.
+
+### Unity Editor 실시간 브리지
+
+`unity-editor/SchoolCodeMcpBridge.cs`를 Unity 프로젝트의 `Assets/Editor/`에 복사한 뒤 Unity 메뉴에서 **School Code → MCP Bridge → Start**를 실행합니다. **Copy Token**으로 토큰을 복사하고 VS Code의 **School Code: Unity Editor 연결 설정**에 입력하세요. 기본 loopback 포트는 `127.0.0.1:18777`이며 `schoolCode.unityEditorPort`와 Unity EditorPrefs 포트를 맞춰야 합니다.
+
+브리지 도구는 `unity_open_scene`, `unity_find_gameobjects`, `unity_get_component`, `unity_set_component`, `unity_create_gameobject`, `unity_save_scene`입니다. loopback과 Bearer 토큰을 사용하고 C#·셸 명령을 실행하지 않습니다. 씬/오브젝트를 바꾸는 세 도구는 쓰기 승인 대상입니다. 자세한 설치는 `unity-editor/README.md`를 참고하세요.
+
+### 프로젝트 Skill 자동 로더
+
+연결된 프로젝트의 `.school-code/skills/<name>/SKILL.md`만 자동으로 검색합니다. `workspace_info`가 Skill 목록과 설명을 제공하고, 에이전트가 `read_skill`로 필요한 지침을 읽습니다. 저장소 전체의 `skills` 폴더를 재귀 검색하지 않으므로 `tools/school-image-mcp/skills` 같은 다른 도구의 Skill은 섞이지 않습니다.
+
+이 저장소에는 `notion-research`, `unity-game-dev`, `unity-build` 예제가 포함되어 있습니다. 다른 프로젝트에서도 같은 `.school-code/skills` 구조로 추가할 수 있습니다.
+
 ### 제공 도구
 
 - `workspace_info`: 연결된 작업 영역 이름, 격리 범위, 지침 파일 및 기능
@@ -103,6 +138,7 @@ SSE 전송 방식이 아니라 **HTTP**를 선택하세요. 이 서버는 statel
 - `search_text`: 문자열 검색
 - `read_asset_metadata`: 바이너리 내용을 전송하지 않고 크기·형식·수정 시각·SHA-256 확인
 - `read_instructions`: `AGENTS.md`, `CODEX.md`, `CLAUDE.md` 등의 프로젝트 지침 읽기
+- `read_skill`: 프로젝트 `.school-code/skills` 지침 읽기
 - `propose_edit`: 전체 파일 수정안 → VS Code diff → 승인 → 적용·저장
 
 읽기·검색·수정은 **건별 승인**합니다. 수정은 검토 중 파일이 바뀌면 거절됩니다. 작업은 120초 후 만료되므로 승인 알림을 확인하세요. 로컬 프로젝트 하나만 연결되며 다른 창이 중계를 동시에 점유할 수 없습니다. `.env`, 키 파일, `.git`, `.ssh`, 의존성 폴더, 심볼릭 링크/정션, 상위 경로 접근을 차단합니다. 임의 터미널 실행·파일 삭제·디렉터리 생성은 이 버전에서 제공하지 않습니다.
@@ -113,7 +149,7 @@ SSE 전송 방식이 아니라 **HTTP**를 선택하세요. 이 서버는 statel
 
 학교에서 확인된 정보: 모델 14개, Astra/Fable ID, 모델 목록과 에이전트 목록 API, `fast/deep/direct`, `agent_id`, SSE 이벤트 형식. 외부 HTTPS 배포와 학교 MCP→실제 VS Code 작업의 전체 경로는 실제 서버 주소와 브라우저 연결 후 별도 검증해야 합니다.
 
-현재는 프로젝트 도구 중심의 텍스트 채팅과 선택 코드 전송을 지원합니다. 이미지/PDF/문서 업로드, 기존 대화 목록 가져오기, 완전한 Markdown 렌더링, 임의 셸 실행은 아직 없습니다. 바이너리 자산은 메타데이터를 확인하며, Unity 씬·게임 오브젝트 상태는 향후 Unity Editor MCP로 확장합니다.
+현재는 프로젝트 도구 중심의 텍스트 채팅과 선택 코드 전송을 지원합니다. Notion 읽기 전용 조회, allowlist Unity CLI, Unity Editor 로컬 브리지, `.school-code/skills` 자동 로딩을 제공합니다. 이미지/PDF/문서 업로드, 기존 대화 목록 가져오기, 완전한 Markdown 렌더링, 임의 셸 실행은 아직 없습니다. 바이너리 자산은 메타데이터만 확인합니다.
 
 ## 개발
 

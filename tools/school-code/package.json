@@ -2,7 +2,7 @@
   "name": "koreatech-school-code",
   "displayName": "KOREATECH School Code",
   "description": "학교 AI 채팅과 승인 기반 개발 도구를 VS Code에서 사용합니다.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "skylight-local",
   "license": "UNLICENSED",
   "private": true,
@@ -39,6 +39,22 @@
       {
         "command": "schoolCode.disconnectRelay",
         "title": "School Code: 외부 MCP 연결 해제"
+      },
+      {
+        "command": "schoolCode.notionConfigure",
+        "title": "School Code: Notion 연결 설정"
+      },
+      {
+        "command": "schoolCode.notionDisconnect",
+        "title": "School Code: Notion 연결 해제"
+      },
+      {
+        "command": "schoolCode.unityConfigure",
+        "title": "School Code: Unity CLI 경로 설정"
+      },
+      {
+        "command": "schoolCode.unityEditorConfigure",
+        "title": "School Code: Unity Editor 연결 설정"
       }
     ],
     "viewsContainers": {
@@ -75,6 +91,20 @@
           "default": "",
           "scope": "application",
           "description": "외부 MCP 중계 서버 HTTPS 주소. 로컬 테스트는 http://127.0.0.1:18880"
+        },
+        "schoolCode.unityExecutable": {
+          "type": "string",
+          "default": "Unity.exe",
+          "scope": "machine",
+          "description": "Unity CLI 실행 파일 경로. 임의 셸 명령은 실행하지 않습니다."
+        },
+        "schoolCode.unityEditorPort": {
+          "type": "number",
+          "default": 18777,
+          "minimum": 1024,
+          "maximum": 65535,
+          "scope": "application",
+          "description": "Unity Editor 로컬 MCP 브리지 포트"
         }
       }
     }
@@ -84,7 +114,7 @@
     "test": "node --test test/*.test.cjs",
     "relay": "node dist/relay.cjs",
     "keys": "node scripts/keys.cjs",
-    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o school-code-0.5.0.vsix"
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o school-code-0.6.0.vsix"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.0",

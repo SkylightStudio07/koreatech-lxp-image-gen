@@ -8,6 +8,10 @@ const workspace=require('./workspace.cjs');
 const {panelHtml}=require('./panel.cjs');
 const {ProjectContext}=require('./project-context.cjs');
 const {SessionStore}=require('./sessions.cjs');
+const {NotionClient}=require('./notion.cjs');
+const unity=require('./unity.cjs');
+const {UnityEditorClient}=require('./unity-editor.cjs');
+const skills=require('./skills.cjs');
 
 function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
@@ -16,10 +20,39 @@ function activate(context){
   let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,projectBusy=false;
   const projectContext=new ProjectContext(vscode,context.workspaceState);
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
+  const notion=new NotionClient({getToken:()=>context.secrets.get('schoolCode.notion.integrationToken')});
+  const unityEditor=new UnityEditorClient({getToken:()=>context.secrets.get('schoolCode.unity.editorToken'),getPort:()=>vscode.workspace.getConfiguration('schoolCode').get('unityEditorPort',18777)});
   const post=m=>view?.webview.postMessage(m);
   const save=async()=>{sessionStore.update(state);await sessionStore.save();};
   function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,busy:!!controller,projectBusy,projectContext:projectContext.info()});}
   async function connectBrowser(){await ready;if(bridgeError)throw Error(bridgeError);await vscode.env.openExternal(vscode.Uri.parse('https://ai.koreatech.ac.kr/AiCA/chat'));vscode.window.showInformationMessage('School Code Connector가 설치되어 있으면 자동 연결됩니다. 최초 설치: 확장 폴더 열기 → Chrome 확장 프로그램에서 압축해제된 확장 로드.');}
+  async function configureNotion(){
+    const existing=await context.secrets.get('schoolCode.notion.integrationToken');
+    const token=await vscode.window.showInputBox({title:'Notion 읽기 전용 연결 토큰',prompt:'Notion 설정에서 만든 Internal Integration Secret을 입력하세요. 토큰은 VS Code SecretStorage에만 저장됩니다.',password:true,ignoreFocusOut:true,value:existing||''});
+    if(!token)return;
+    if(token.trim().length<20)throw Error('Notion 토큰이 너무 짧습니다.');
+    const previous=existing;await context.secrets.store('schoolCode.notion.integrationToken',token.trim());
+    try{await notion.request('/users/me');vscode.window.showInformationMessage('Notion 읽기 전용 연결이 설정되었습니다.');}
+    catch(e){if(previous)await context.secrets.store('schoolCode.notion.integrationToken',previous);else await context.secrets.delete('schoolCode.notion.integrationToken');throw e;}
+  }
+  async function disconnectNotion(){await context.secrets.delete('schoolCode.notion.integrationToken');vscode.window.showInformationMessage('Notion 연결 토큰을 삭제했습니다.');}
+  async function configureUnity(){
+    const config=vscode.workspace.getConfiguration('schoolCode');
+    const current=config.get('unityExecutable','');
+    const executable=await vscode.window.showInputBox({title:'Unity 실행 파일 경로',prompt:'Unity.exe 경로 또는 PATH에 등록된 Unity.exe를 입력하세요. 임의 셸 명령은 실행하지 않습니다.',value:current||'Unity.exe',ignoreFocusOut:true});
+    if(!executable||typeof config.update!=='function')return;
+    await config.update('unityExecutable',executable.trim(),vscode.ConfigurationTarget?.Global??true);
+    vscode.window.showInformationMessage('Unity CLI 경로를 저장했습니다.');
+  }
+  async function configureUnityEditor(){
+    const existing=await context.secrets.get('schoolCode.unity.editorToken');
+    const token=await vscode.window.showInputBox({title:'Unity Editor MCP 브리지 토큰',prompt:'Unity Editor 메뉴 School Code → MCP Bridge → Copy Token의 값을 입력하세요. 토큰은 VS Code SecretStorage에만 저장됩니다.',password:true,ignoreFocusOut:true,value:existing||''});
+    if(!token)return;
+    if(token.trim().length<20)throw Error('Unity Editor 브리지 토큰이 너무 짧습니다.');
+    await context.secrets.store('schoolCode.unity.editorToken',token.trim());
+    try{await unityEditor.call('unity_find_gameobjects',{query:''});vscode.window.showInformationMessage('Unity Editor 브리지 연결이 확인되었습니다.');}
+    catch(e){await context.secrets.delete('schoolCode.unity.editorToken');throw e;}
+  }
   async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50');agents=[...new Map([...(own.items||[]),...(pub.items||[])].map(a=>[a.id,{id:a.id,name:a.name}])).values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
   async function send(data){if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
     const message=String(data.message||'');if(!message.trim())throw Error('질문을 입력하세요.');const composed=projectContext.compose(message);const body=chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId},models);
@@ -60,9 +93,42 @@ function activate(context){
   }
   async function executeTool(job,isActive,ensureActive){
     if(!vscode.workspace.isTrusted||!relayRoot||!isActive())throw Error('작업 영역 연결이 종료되었습니다.');const root=relayRoot,args=job.args||{};
+    const notionTool=job.name.startsWith('notion_');
     if(job.name==='workspace_info'){
-      const instructions=await workspace.readInstructions(root);
-      return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000}};
+      const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
+      return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:!!vscode.workspace.getConfiguration('schoolCode').get('unityExecutable',''),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000}};
+    }
+    if(notionTool){
+      if(!await approval(`학교 AI가 Notion 읽기 도구 ${job.name}을 요청했습니다. 공유된 페이지 내용이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
+      await ensureActive();
+      if(job.name==='notion_search')return notion.search(args);
+      if(job.name==='notion_fetch_page')return notion.fetchPage(args.page_id);
+      if(job.name==='notion_list_children')return notion.listChildren(args);
+    }
+    const unityTool=['unity_project_info','unity_run_tests','unity_build','unity_refresh_assets'].includes(job.name);
+    if(unityTool){
+      const write=job.name==='unity_build'||job.name==='unity_refresh_assets';
+      if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트에서 Unity 도구 ${job.name}을 실행하려 합니다.${write?' 프로젝트 파일이나 빌드 산출물이 바뀔 수 있습니다.':''}`,{write}))throw Error('사용자가 거절했습니다.');
+      await ensureActive();
+      const executable=vscode.workspace.getConfiguration('schoolCode').get('unityExecutable','Unity.exe')||'Unity.exe';
+      let result;
+      if(job.name==='unity_project_info')result=await unity.projectInfo(root);
+      else if(job.name==='unity_run_tests')result=await unity.runTests({executable,root,platform:args.platform});
+      else if(job.name==='unity_build')result=await unity.build({executable,root,target:args.target,outputPath:args.output_path});
+      else if(job.name==='unity_refresh_assets')result=await unity.refreshAssets({executable,root});
+      else throw Error('지원하지 않는 Unity 도구');
+      if(result?.output)result.output=result.output.replaceAll(root,'<project>');
+      return result;
+    }
+    const unityEditorTool=job.name.startsWith('unity_')&&['unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene'].includes(job.name);
+    if(unityEditorTool){
+      const write=['unity_set_component','unity_create_gameobject','unity_save_scene'].includes(job.name);
+      if(!await approval(`학교 AI가 연결된 Unity Editor에서 ${job.name}을 실행하려 합니다.${write?' 씬이나 오브젝트가 변경될 수 있습니다.':''}`,{write}))throw Error('사용자가 거절했습니다.');
+      await ensureActive();return unityEditor.call(job.name,args);
+    }
+    if(job.name==='read_skill'){
+      if(!await approval(`학교 AI가 프로젝트 Skill ${args.name}을 읽으려 합니다. .school-code/skills 안의 지침이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
+      await ensureActive();return skills.readSkill(root,args.name);
     }
     if(!['list_files','read_file','search_text','read_asset_metadata','read_instructions','propose_edit'].includes(job.name))throw Error('지원하지 않는 도구');
     if(job.name!=='propose_edit'){
@@ -140,7 +206,7 @@ function activate(context){
     if(m.type==='disconnectRelay')return await disconnectRelay();
   }catch(e){post({type:'notice',text:e.message});vscode.window.showErrorMessage('School Code: '+e.message);}}
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
-  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.disconnectRelay':disconnectRelay}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
+  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
   const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();disconnectRelay();}});
 }
 module.exports={activate};
