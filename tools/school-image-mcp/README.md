@@ -9,6 +9,58 @@ KOREATECH 로그인 세션으로 이미지를 생성해 로컬 프로젝트에 P
 - localhost 브리지: `127.0.0.1:18765`에만 바인딩합니다. 학교 origin만 CORS 허용, MCP 클라이언트와 브라우저 작업자 키를 분리합니다.
 - 직접 HTTP 모드도 지원하지만 쿠키/CSRF를 사용자가 환경변수로 제공해야 합니다. Chrome 세션을 읽어 자동 추출하는 기능은 없습니다.
 
+## 처음 설정부터 이미지 생성까지
+
+아래는 Windows에서 처음 연결하는 순서입니다. Claude Code, Chrome, Node.js 22 이상이 필요합니다.
+
+### A. 저장소와 프로젝트를 한 번 연결하기
+
+PowerShell에서 저장소를 내려받고 의존성을 설치합니다. 프로젝트 경로를 실제 Claude Code 프로젝트 경로로 바꾸세요.
+
+```powershell
+git clone https://github.com/SkylightStudio07/koreatech-lxp-image-gen.git
+$repoDir = Join-Path $PWD 'koreatech-lxp-image-gen'
+$bridgeDir = Join-Path $repoDir 'tools\school-image-mcp'
+$projectDir = 'C:\Users\YOUR_NAME\Documents\Project-Vertex'
+Set-Location -LiteralPath $bridgeDir
+npm.cmd ci
+node scripts/install-project.js "$projectDir"
+```
+
+이 명령은 프로젝트에 `.mcp.json`, `.claude\skills\school-image\SKILL.md`, `GeneratedAssets\SchoolAI`를 만듭니다. 기존 MCP 설정을 보존합니다. **저장소를 이동하면** MCP 설정에 저장된 절대 경로가 바뀌므로 설치 명령을 새 위치에서 다시 실행하세요.
+
+### B. Chrome 연결 북마크를 한 번 만들기
+
+1. `tools\school-image-mcp\connect-school-image.bat`을 더블클릭합니다. 브리지가 없으면 별도 터미널 창에서 켜고 연결 코드를 클립보드에 복사한 뒤 학교 채팅을 엽니다.
+2. Chrome에서 [학교 AI 채팅](https://ai.koreatech.ac.kr/AiCA/chat)에 로그인합니다.
+3. 북마크바가 안 보이면 `Ctrl+Shift+B`를 누릅니다. 북마크바를 우클릭해 **페이지 추가**를 선택합니다.
+4. 이름을 `KOREATECH AI 연결`로 적고 URL 칸에 복사된 코드를 붙여 넣어 저장합니다. URL이 `javascript:`로 시작하는지 확인하세요. **주소창에 붙여 넣으면 안 됩니다.**
+5. 학교 채팅 탭에서 새 북마크를 클릭합니다. Chrome이 로컬 네트워크 접근을 묻는 경우 허용합니다.
+
+북마크 코드는 로그인 정보가 아니라 탭 안에서 워커를 시작하는 코드입니다. 브라우저 보안 때문에 배치 파일이 대신 북마크를 누르지는 못합니다.
+
+### C. Claude Code에서 승인하고 이미지 만들기
+
+1. Claude Code에서 위에서 설정한 `$projectDir` 폴더를 엽니다.
+2. `school-image` MCP 서버를 허용하라는 확인이 나오면 승인하고 새 세션을 시작합니다. 이 승인은 Chrome의 로컬 네트워크 권한과 별개입니다.
+3. Claude Code에 아래처럼 요청합니다.
+
+```text
+/school-image 학교 AI로 흰 배경의 파란 크리스탈 아이콘 1장을 생성해 줘.
+중앙에 단독 배치하고 글자는 넣지 마. GeneratedAssets/SchoolAI/crystal-blue-v1.png로 저장하고 결과를 확인해 줘.
+```
+
+PNG는 프로젝트의 `GeneratedAssets\SchoolAI`에 저장됩니다. 생성 요청은 학교 계정의 할당량을 사용합니다. PNG 저장은 Unity 임포트나 씬 연결을 자동으로 하지 않습니다.
+
+### 다음부터 매번 사용할 때
+
+1. 학교 계정이 Chrome에서 로그인 상태인지 확인합니다.
+2. `connect-school-image.bat`을 실행합니다. 브리지가 이미 켜져 있으면 기존 브리지를 사용하고, 학교 채팅 페이지를 엽니다.
+3. 학교 채팅 탭에서 저장해 둔 `KOREATECH AI 연결` 북마크를 클릭합니다. 탭을 새로고침하거나 닫았다면 다시 눌러야 합니다.
+4. Claude Code에서 프로젝트를 열고 이미지 요청을 합니다.
+
+정상 연결 여부는 MCP 폴더에서 `npm.cmd run doctor`로 확인합니다. `{"broker":true,"connected":true,"pending":0}`이면 준비됐습니다. `connected:false`라면 학교 채팅 탭에서 북마크를 눌렀는지, Chrome 로컬 네트워크 권한이 허용됐는지 확인하세요. 브리지를 종료하려면 브리지 터미널에서 `Ctrl+C`를 누릅니다.
+
 ## 1. 설치 및 프로젝트 등록
 
 필요한 것: Node.js 22 이상, Chrome의 학교 AI 로그인, Claude Code. 저장소를 내려받은 뒤 PowerShell에서 실행합니다. 아래 두 경로를 자신의 위치로 바꾸세요.
