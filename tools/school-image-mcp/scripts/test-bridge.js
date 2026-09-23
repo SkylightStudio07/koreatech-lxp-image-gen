@@ -17,6 +17,9 @@ try {
   assert.equal((await fetch(base+'/rpc',{method:'POST',body:'{}'})).status,403);
   const {workerToken}=await(await fetch(base+'/connect',{headers:{Origin:origin}})).json();
   const workerHeaders={Origin:origin,Authorization:`Bearer ${workerToken}`,'Content-Type':'application/json'};
+  assert.equal((await fetch(base+'/heartbeat',{headers:workerHeaders})).status,200);
+  const health=await fetch(base+'/health',{headers:{Authorization:`Bearer ${connection.clientToken}`}});
+  assert.equal((await health.json()).connected,true);
   const poll=fetch(base+'/poll',{headers:workerHeaders});await delay(100);
   const rpc=fetch(base+'/rpc',{method:'POST',headers:{Authorization:`Bearer ${connection.clientToken}`,'Content-Type':'application/json'},body:JSON.stringify({route:'/models',method:'GET'})});
   const job=await(await poll).json();assert.equal(job.route,'/models');

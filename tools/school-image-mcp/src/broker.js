@@ -53,6 +53,10 @@ const server = http.createServer(async (req, res) => {
       jobs.set(id,{id,payload,res,timer,delivered:false}); dispatch(); return;
     }
     if (!authorized(req,workerToken) || site !== origin) return send(res,403,{error:'FORBIDDEN'});
+    if (req.url === '/heartbeat' && req.method === 'GET') {
+      lastSeen = Date.now();
+      return send(res,200,{ok:true});
+    }
     if (req.url === '/poll' && req.method === 'GET') {
       lastSeen = Date.now();
       if (poll) {clearTimeout(poll.timer); send(poll.res,200,{});}
