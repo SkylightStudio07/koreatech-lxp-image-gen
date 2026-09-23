@@ -1,0 +1,10 @@
+node_modules/**
+src/**
+test/**
+scripts/**
+deploy/**
+.local/**
+*.vsix
+*.zip
+package-lock.json
+dist/relay.cjs

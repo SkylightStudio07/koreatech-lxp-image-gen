@@ -1,0 +1,15 @@
+services:
+  school-code-relay:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.local/relay.env
+    ports:
+      - "127.0.0.1:18880:18880"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

@@ -8,3 +8,8 @@ tools/school-image-mcp/research/
 *.log
 # This workspace's generated, machine-specific MCP registration.
 /.mcp.json
+
+# Generated School Code build and release artifacts.
+tools/school-code/dist/
+tools/school-code/*.vsix
+tools/school-code/*.zip

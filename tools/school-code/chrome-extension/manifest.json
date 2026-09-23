@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "KOREATECH School Code Connector",
+  "version": "0.2.0",
+  "description": "로그인된 학교 AI와 VS Code School Code를 자동으로 연결합니다.",
+  "minimum_chrome_version": "120",
+  "permissions": ["alarms", "scripting", "storage"],
+  "host_permissions": ["https://ai.koreatech.ac.kr/*", "http://127.0.0.1/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html", "default_title": "School Code 연결 상태"}
+}
