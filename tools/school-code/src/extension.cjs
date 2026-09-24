@@ -20,7 +20,7 @@ function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
   const port=vscode.workspace.getConfiguration('schoolCode').get('bridgePort',18766);
   const bridge=new BrowserBridge(port);let bridgeError='';const ready=bridge.start().catch(e=>{bridgeError=e.code==='EADDRINUSE'?'브리지 포트가 사용 중입니다. 다른 VS Code 창을 닫거나 bridgePort를 변경하세요.':e.message;output.appendLine(bridgeError);});context.subscriptions.push({dispose:()=>bridge.dispose()});
-  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,projectBusy=false;
+  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',projectBusy=false;
   const imagePreviews=new Map(),imageLoads=new Map();
   const projectContext=new ProjectContext(vscode,context.workspaceState);
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
@@ -30,20 +30,30 @@ function activate(context){
   const taskManager=new TaskManager();
   const post=m=>view?.webview.postMessage(m);
   const save=async()=>{sessionStore.update(state);await sessionStore.save();};
+  function unityExecutable(){
+    const saved=context.globalState?.get?.('schoolCode.unityExecutable');
+    if(typeof saved==='string'&&saved.trim())return saved.trim();
+    return vscode.workspace.getConfiguration('schoolCode').get('unityExecutable','Unity.exe')||'Unity.exe';
+  }
+  function unityPathConfigured(){
+    const saved=context.globalState?.get?.('schoolCode.unityExecutable');
+    if(typeof saved==='string'&&saved.trim())return true;
+    const value=vscode.workspace.getConfiguration('schoolCode').get('unityExecutable','');
+    return !!value&&value!=='Unity.exe';
+  }
   function mcpSnapshot(){
-    const config=vscode.workspace.getConfiguration('schoolCode');
     const notionConfigured=!!mcpRegistry.get('notion');
     const unityEditorConfigured=!!mcpRegistry.get('unity-editor');
     return mcpRegistry.list().map(item=>{
       let configured=item.configured,status=item.configured?'configured':'not-configured';
-      if(item.id==='school-workspace'){configured=configured||relayConnected;status=relayConnected?'connected':configured?'configured':'not-connected';}
+      if(item.id==='school-workspace'){configured=configured||relayConnected;status=relayConnected?'connected':relayError?'error':configured?'configured':'not-connected';}
       if(item.id==='notion'){configured=notionConfigured;status=configured?'configured':'not-configured';}
-      if(item.id==='unity-cli'){configured=!!config.get('unityExecutable','');status=configured?'configured':'not-configured';}
+      if(item.id==='unity-cli'){configured=unityPathConfigured()||!!mcpRegistry.get('unity-cli');status=configured?'configured':'not-configured';}
       if(item.id==='unity-editor'){configured=unityEditorConfigured;status=configured?'configured':'not-configured';}
-      return {...item,configured,status};
+      return {...item,configured,status,error:item.id==='school-workspace'?relayError:''};
     });
   }
-  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
+  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,relayError,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
   function cleanAttachments(value){
     const list=Array.isArray(value)?value:[];
     return list.map(a=>{
@@ -103,11 +113,10 @@ function activate(context){
   }
   async function disconnectNotion(){await context.secrets.delete('schoolCode.notion.integrationToken');mcpRegistry.remove('notion');await mcpRegistry.save();vscode.window.showInformationMessage('Notion 연결 토큰을 삭제했습니다.');snapshot();}
   async function configureUnity(){
-    const config=vscode.workspace.getConfiguration('schoolCode');
-    const current=config.get('unityExecutable','');
+    const current=unityExecutable();
     const executable=await vscode.window.showInputBox({title:'Unity 실행 파일 경로',prompt:'Unity.exe 경로 또는 PATH에 등록된 Unity.exe를 입력하세요. 셸 도구는 별도 승인 후 프로젝트 안에서만 실행됩니다.',value:current||'Unity.exe',ignoreFocusOut:true});
-    if(!executable||typeof config.update!=='function')return;
-    await config.update('unityExecutable',executable.trim(),vscode.ConfigurationTarget?.Global??true);mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});await mcpRegistry.save();snapshot();
+    if(!executable)return;
+    await context.globalState?.update?.('schoolCode.unityExecutable',executable.trim());mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});await mcpRegistry.save();snapshot();
     vscode.window.showInformationMessage('Unity CLI 경로를 저장했습니다.');
   }
   async function configureUnityEditor(){
@@ -177,8 +186,7 @@ function activate(context){
     if(item.catalogId==='notion')return disconnectNotion();
     if(item.catalogId==='unity-editor'){await context.secrets.delete('schoolCode.unity.editorToken');mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;}
     if(item.catalogId==='unity-cli'){
-      const config=vscode.workspace.getConfiguration('schoolCode');
-      if(typeof config.update==='function')await config.update('unityExecutable','',vscode.ConfigurationTarget?.Global??true);
+      await context.globalState?.update?.('schoolCode.unityExecutable',undefined);
       mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;
     }
     if(await vscode.window.showWarningMessage(`${item.name} 연결 정보를 삭제할까요?`,{modal:true},'삭제')!=='삭제')return;
@@ -188,7 +196,7 @@ function activate(context){
     let changed=false;
     if(await context.secrets.get('schoolCode.notion.integrationToken')&&!mcpRegistry.get('notion')){mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});changed=true;}
     if(await context.secrets.get('schoolCode.unity.editorToken')&&!mcpRegistry.get('unity-editor')){mcpRegistry.upsert({id:'unity-editor',catalogId:'unity-editor',name:'Unity Editor MCP',description:'실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',kind:'local-mcp',enabled:true,capabilities:['unity','scene']});changed=true;}
-    if(vscode.workspace.getConfiguration('schoolCode').get('unityExecutable','')&&!mcpRegistry.get('unity-cli')){mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});changed=true;}
+    if(unityPathConfigured()&&!mcpRegistry.get('unity-cli')){mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});changed=true;}
     if(changed){await mcpRegistry.save();snapshot();}
   }
   async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50');agents=[...new Map([...(own.items||[]),...(pub.items||[])].map(a=>[a.id,{id:a.id,name:a.name}])).values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
@@ -239,7 +247,7 @@ function activate(context){
     const notionTool=job.name.startsWith('notion_');
     if(job.name==='workspace_info'){
       const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
-      return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:!!vscode.workspace.getConfiguration('schoolCode').get('unityExecutable',''),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+       return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
@@ -271,7 +279,7 @@ function activate(context){
       const write=job.name==='unity_build'||job.name==='unity_refresh_assets';
       if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트에서 Unity 도구 ${job.name}을 실행하려 합니다.${write?' 프로젝트 파일이나 빌드 산출물이 바뀔 수 있습니다.':''}`,{write}))throw Error('사용자가 거절했습니다.');
       await ensureActive();
-      const executable=vscode.workspace.getConfiguration('schoolCode').get('unityExecutable','Unity.exe')||'Unity.exe';
+      const executable=unityExecutable();
       let result;
       if(job.name==='unity_project_info')result=await unity.projectInfo(root);
       else if(job.name==='unity_run_tests')result=await unity.runTests({executable,root,platform:args.platform});
@@ -326,11 +334,11 @@ function activate(context){
       return {applied:true,path:args.path,sha256:workspace.sha(Buffer.from(args.content))};
     }finally{previews.delete(left.toString());previews.delete(right.toString());}
   }
-  async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
+  async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
   async function connectRelay(){
     if(relayController)return vscode.window.showInformationMessage('이미 연결 중입니다. 먼저 외부 MCP 연결을 해제하세요.');
     if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역이 필요합니다.');
-    const project=await projectContext.ensure();snapshot();
+    const project=await projectContext.ensure();relayError='';snapshot();
     const raw=await vscode.window.showInputBox({title:'MCP 중계 서버 주소',value:vscode.workspace.getConfiguration('schoolCode').get('relayUrl',''),prompt:'HTTPS 주소 또는 로컬 테스트용 http://127.0.0.1:18880'});if(!raw)return;
     const u=new URL(raw);if(u.username||u.password||u.search||u.hash||u.pathname!=='/'||!(u.protocol==='https:'||u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error('HTTPS 서버 기본 주소를 입력하세요.');const url=u.origin;
     const key='relay:'+url;let token=await context.secrets.get(key);
@@ -339,14 +347,14 @@ function activate(context){
     if(projectContext.project!==project)throw Error('프로젝트가 변경되었습니다. MCP를 다시 연결하세요.');
     await context.secrets.store(key,token);relayRoot=project.path;const ctl=relayController=new AbortController();const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','X-Worker-Id':randomUUID()};relaySession={url,headers};
     const call=async(route,body,timeout=30000)=>{const r=await fetch(url+route,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.any([ctl.signal,AbortSignal.timeout(timeout)])});if(!r.ok)throw Error(`중계 HTTP ${r.status}`);return r.json();};
-    let heartbeatBusy=false;const heartbeat=setInterval(async()=>{if(heartbeatBusy||ctl.signal.aborted)return;heartbeatBusy=true;try{await call('/worker/heartbeat');relayConnected=true;}catch{relayConnected=false;}finally{heartbeatBusy=false;snapshot();}},10000);
-    (async()=>{try{await call('/worker/heartbeat');relayConnected=true;mcpRegistry.upsert({id:'school-workspace',catalogId:'school-workspace',name:'학교 Workspace',description:'현재 프로젝트 Workspace Relay',kind:'relay',url,enabled:true,capabilities:['workspace','shell','unity']});await mcpRegistry.save();snapshot();while(!ctl.signal.aborted){try{const job=await call('/worker/poll');relayConnected=true;snapshot();if(!job.id)continue;let result,error;
+     let heartbeatBusy=false;const heartbeat=setInterval(async()=>{if(heartbeatBusy||ctl.signal.aborted)return;heartbeatBusy=true;try{await call('/worker/heartbeat');relayConnected=true;relayError='';}catch(e){relayConnected=false;relayError=String(e.message||'중계 서버에 연결할 수 없습니다.').slice(0,200);}finally{heartbeatBusy=false;snapshot();}},10000);
+     (async()=>{try{await call('/worker/heartbeat');relayConnected=true;relayError='';mcpRegistry.upsert({id:'school-workspace',catalogId:'school-workspace',name:'학교 Workspace',description:'현재 프로젝트 Workspace Relay',kind:'relay',url,enabled:true,capabilities:['workspace','shell','unity']});await mcpRegistry.save();snapshot();while(!ctl.signal.aborted){try{const job=await call('/worker/poll');relayConnected=true;relayError='';snapshot();if(!job.id)continue;let result,error;
       const deadline=Math.min(Date.now()+115000,Number(job.expiresAt)||0);let active=true;const check=()=>active&&!ctl.signal.aborted&&Date.now()<deadline;
       const ensureActive=async()=>{if(!check())throw Error('요청 만료 — 변경하지 않았습니다.');const remote=await call('/worker/status',{id:job.id});if(!remote.active||!check())throw Error('중계 요청 만료');};
       const expiry=setTimeout(()=>active=false,Math.max(0,deadline-Date.now()));
       try{result=await executeTool(job,check,ensureActive);if(!check())throw Error('요청 만료');}catch(e){error=e.message;}finally{clearTimeout(expiry);}
       await call('/worker/result',{id:job.id,result,error}).catch(e=>output.appendLine(e.message));
-    }catch(e){relayConnected=false;snapshot();if(ctl.signal.aborted)break;output.appendLine(e.message);await new Promise(resolve=>{const onAbort=()=>{clearTimeout(t);resolve();};const t=setTimeout(()=>{ctl.signal.removeEventListener('abort',onAbort);resolve();},3000);ctl.signal.addEventListener('abort',onAbort,{once:true});});}}}catch(e){if(!ctl.signal.aborted){output.appendLine(e.message);post({type:'notice',text:e.message});}}finally{clearInterval(heartbeat);if(relayController===ctl){relayController=null;relayConnected=false;snapshot();}}})();
+     }catch(e){relayConnected=false;relayError=String(e.message||'중계 서버에 연결할 수 없습니다.').slice(0,200);snapshot();if(ctl.signal.aborted)break;output.appendLine(e.message);await new Promise(resolve=>{const onAbort=()=>{clearTimeout(t);resolve();};const t=setTimeout(()=>{ctl.signal.removeEventListener('abort',onAbort);resolve();},3000);ctl.signal.addEventListener('abort',onAbort,{once:true});});}}}catch(e){if(!ctl.signal.aborted){relayConnected=false;relayError=String(e.message||'중계 서버에 연결할 수 없습니다.').slice(0,200);output.appendLine(e.message);post({type:'notice',text:e.message});snapshot();}}finally{clearInterval(heartbeat);if(relayController===ctl){relayController=null;relayConnected=false;snapshot();}}})();
   }
   async function handle(m){try{
     if(m.type==='ready'){snapshot();postImagePreviews();void hydrateAttachments(state);return;}
