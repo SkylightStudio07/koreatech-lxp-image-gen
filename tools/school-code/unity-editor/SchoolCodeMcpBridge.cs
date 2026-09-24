@@ -111,6 +111,14 @@ public static class SchoolCodeMcpBridge
     [MenuItem("School Code/MCP Bridge/Start")]
     public static void Start()
     {
+        // Unity's AssetImportWorker processes load Editor assemblies too. They
+        // run in batch mode and must never claim the user's MCP loopback port;
+        // only the interactive Unity Editor should host this bridge.
+        if (Application.isBatchMode)
+        {
+            Debug.Log("School Code Unity Editor MCP bridge skipped in batch mode.");
+            return;
+        }
         if (listener != null && listener.IsListening) return;
         port = EditorPrefs.GetInt(PortKey, DefaultPort);
         if (port < 1024 || port > 65535) port = DefaultPort;

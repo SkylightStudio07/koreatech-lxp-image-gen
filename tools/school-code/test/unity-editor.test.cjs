@@ -18,6 +18,7 @@ test('Unity Editor client reports bridge errors without exposing token',async()=
 test('bundled Unity bridge auto-starts and reads the per-user token file',()=>{
   const source=fs.readFileSync(path.join(__dirname,'..','unity-editor','SchoolCodeMcpBridge.cs'),'utf8');
   assert.match(source,/EditorApplication\.quitting \+= Stop;[\s\S]*Start\(\);/);
+  assert.match(source,/if \(Application\.isBatchMode\)[\s\S]*bridge skipped in batch mode/);
   assert.match(source,/Environment\.SpecialFolder\.UserProfile/);
   assert.match(source,/unity-editor-token/);
 });
