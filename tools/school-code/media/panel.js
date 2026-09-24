@@ -15,6 +15,20 @@ for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachments
   $(type).addEventListener('click', () => vscode.postMessage({ type: type === 'new' ? 'sessionNew' : type }));
 }
 
+function setScreen(screen) {
+  const settings = screen === 'settings';
+  $('settingsView').hidden = !settings;
+  $('sessionView').hidden = settings;
+  $('settingsTab').classList.toggle('active', settings);
+  $('sessionTab').classList.toggle('active', !settings);
+  document.body.classList.toggle('settings-mode', settings);
+  document.body.classList.toggle('session-mode', !settings);
+}
+setScreen('session');
+$('sessionTab').addEventListener('click', () => setScreen('session'));
+$('settingsTab').addEventListener('click', () => setScreen('settings'));
+$('sessionConnect').addEventListener('click', () => { if ($('dot').classList.contains('online')) setScreen('settings'); else vscode.postMessage({ type: 'connect' }); });
+
 function makeClientId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -199,6 +213,10 @@ $('compactionThreshold').addEventListener('change', () => vscode.postMessage({ t
 function connection(m) {
   $('dot').className = m.connected ? 'online' : '';
   $('connection').textContent = m.error || (m.connected ? '학교 브라우저 연결됨' : '브라우저 연결 대기');
+  const sessionConnection = $('sessionConnection');
+  if (sessionConnection) sessionConnection.textContent = m.error || (m.connected ? '학교 브라우저 연결됨' : '브라우저 연결 대기');
+  const sessionConnect = $('sessionConnect');
+  if (sessionConnect) sessionConnect.textContent = m.connected ? '설정' : '연결';
   $('relayState').textContent = m.relay ? '학교 Workspace 연결됨 · 도구별 승인' : m.relayError ? `학교 Workspace 오류 · ${m.relayError}` : '학교 Workspace 연결 안 됨';
   const tool = $('toolState');
   if (!tool || !m.projectContext) return;
