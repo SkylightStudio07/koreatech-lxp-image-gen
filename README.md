@@ -5,6 +5,7 @@ KOREATECH 학교 AI의 이미지 생성 기능을 Claude Code에서 호출하는
 - [처음 설치부터 이미지 생성까지 따라 하는 사용 설명서](tools/school-image-mcp/README.md)
 - [이미지 제작 스킬](tools/school-image-mcp/skills/school-image/SKILL.md)
 - [실제 API 조사 및 검증 기록](docs/school-ai-api-notes.md)
+- [BCSD 구성원용 School Code·MCP 설치 가이드](forBCSD.md)
 
 ## 빠른 시작
 

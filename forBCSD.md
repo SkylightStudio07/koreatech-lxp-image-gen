@@ -1,0 +1,291 @@
+# BCSD용 School Code·학교 AI MCP 설치 및 연결 가이드
+
+이 문서는 BCSD 구성원이 Windows에서 **KOREATECH School Code VS Code 확장**을 설치하고, 운영 중인 `bcsd-nai` MCP 중계 서버를 학교 AI에 등록하는 전체 절차를 정리한 문서입니다. 설치만 하면 학교 AI 채팅을 VS Code에서 사용할 수 있고, MCP까지 연결하면 선택한 프로젝트의 파일·셸·Unity 도구를 학교 에이전트가 호출할 수 있습니다.
+
+이 문서에서 말하는 서버 주소는 현재 BCSD 서버 기준입니다.
+
+| 용도 | 주소 |
+|---|---|
+| 중계 서버 기본 주소 | `https://bcsd-nai.mywire.org:3010` |
+| 서버 상태 확인 | `https://bcsd-nai.mywire.org:3010/health` |
+| 학교 AI에 등록할 MCP 주소 | `https://bcsd-nai.mywire.org:3010/mcp` |
+
+토큰은 이 문서에 적지 않습니다. 운영자가 권한이 있는 구성원에게 개인적으로 전달해야 합니다.
+
+## 1. 먼저 구분해야 하는 네 가지
+
+### School Code 확장
+
+VS Code 안에 채팅 화면과 프로젝트 도구를 설치하는 확장입니다. 학교 API를 직접 호출하지 않고 로그인된 Chrome 탭을 통해 학교 AI에 요청합니다.
+
+### Chrome Connector
+
+학교 AI 로그인 쿠키를 가진 탭과 VS Code 사이를 연결하는 Manifest V3 확장입니다. 학교 계정 쿠키나 CSRF 값을 NAS로 보내지 않고, 로그인 탭 안에서 학교 API 요청을 실행합니다.
+
+### 학교 Workspace MCP
+
+`/mcp`에 등록하는 외부 MCP 서버입니다. 학교 에이전트가 `read_file`, `search_text`, `propose_edit`, Unity 도구 등을 호출하면 중계 서버가 현재 연결된 VS Code 워커로 작업을 전달합니다.
+
+### 두 토큰
+
+| 이름 | 어디에 입력하는가 | 의미 |
+|---|---|---|
+| `MCP_TOKEN` | 학교 AI의 **리소스 → MCP** 등록 화면 | 학교 에이전트가 `/mcp`에 접속할 때 쓰는 Bearer 토큰 |
+| `WORKER_TOKEN` | VS Code School Code의 **학교 Workspace 연결** 화면 | VS Code 워커가 `/worker/*`에 접속할 때 쓰는 Bearer 토큰 |
+
+두 토큰은 반드시 서로 달라야 합니다. `MCP_TOKEN`을 VS Code 입력창에 넣거나 `WORKER_TOKEN`을 학교 MCP 인증 JSON에 넣으면 각각 `401`, `연결 안 됨`, `도구 목록 없음` 같은 오류가 납니다.
+
+## 2. 준비물
+
+- Windows 10/11
+- VS Code 1.95 이상
+- Chrome
+- KOREATECH 학교 AI 계정
+- 운영자가 전달한 `MCP_TOKEN`
+- VS Code에서 프로젝트 도구까지 사용할 경우 운영자가 전달한 `WORKER_TOKEN`
+- 저장소의 `tools/school-code/school-code-0.9.6.vsix`
+
+채팅만 사용할 사람은 MCP 토큰이나 Workspace 토큰 없이도 학교 브라우저 연결과 모델 대화까지 설정할 수 있습니다. 프로젝트 파일·Unity·셸 도구를 사용할 사람은 아래 절차를 끝까지 진행해야 합니다.
+
+## 3. VS Code 확장 설치
+
+### 방법 A: 저장소에서 설치
+
+PowerShell에서 저장소 루트로 이동한 뒤 VSIX를 설치합니다.
+
+```powershell
+cd G:\Koreatech-Codex\school-ai
+code --install-extension .\tools\school-code\school-code-0.9.6.vsix --force
+code --list-extensions --show-versions | Select-String koreatech-school-code
+```
+
+정상 결과에는 다음과 비슷한 항목이 표시됩니다.
+
+```text
+skylight-local.koreatech-school-code@0.9.6
+```
+
+VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **Shell Command: Install 'code' command in PATH**를 실행하거나, VSIX 파일을 VS Code 창으로 끌어 놓아 설치합니다.
+
+### 방법 B: VSIX 파일 직접 설치
+
+1. VS Code를 엽니다.
+2. `Ctrl+Shift+P`를 누릅니다.
+3. **Extensions: Install from VSIX...**를 선택합니다.
+4. `tools/school-code/school-code-0.9.6.vsix`를 선택합니다.
+5. 설치가 끝나면 **Developer: Reload Window**를 실행합니다.
+
+설치 후 왼쪽 Activity Bar에서 `School Code` 아이콘을 선택하고 **학교 AI** 뷰를 엽니다. 아이콘이 보이지 않으면 명령 팔레트에서 **School Code: 채팅 열기**를 실행합니다.
+
+## 4. Chrome Connector 설치
+
+1. School Code 패널의 **설정** 탭을 엽니다.
+2. **연결 및 외부 MCP**를 펼칩니다.
+3. **Chrome 확장 폴더 열기**를 누릅니다.
+4. Chrome 주소창에 `chrome://extensions`를 입력합니다.
+5. 오른쪽 위 **개발자 모드**를 켭니다.
+6. **압축해제된 확장 프로그램을 로드**를 누릅니다.
+7. VS Code가 열어 준 `tools/school-code/chrome-extension` 폴더를 선택합니다.
+
+이미 설치되어 있다면 새로 설치하지 말고 `chrome://extensions`의 **새로고침** 버튼을 누릅니다. Chrome Connector를 삭제하면 안 됩니다. School Code 확장은 이 Connector가 로그인된 학교 탭에 주입하는 워커를 통해 학교 API를 호출합니다.
+
+## 5. 학교 브라우저 연결
+
+1. Chrome에서 다음 주소를 엽니다.
+
+   `https://ai.koreatech.ac.kr/AiCA/chat`
+
+2. 학교 계정으로 로그인합니다.
+3. 로그인된 탭을 닫지 않습니다.
+4. VS Code School Code의 **설정 → 브라우저 연결**을 누릅니다.
+5. Chrome에서 로컬 네트워크 접근 권한을 묻는 경우 허용합니다.
+6. **모델·에이전트 새로고침**을 누릅니다.
+7. **채팅** 탭의 모델 또는 에이전트를 선택합니다.
+
+연결이 완료되면 `학교 브라우저 연결됨`이 표시되고 모델 목록에 Astra/Fable 등이 나타납니다. 여러 학교 탭을 열어 두면 Connector는 첫 번째로 검색된 학교 채팅 탭을 사용하므로, 다른 학교 탭은 닫아 두는 편이 안전합니다.
+
+## 6. BCSD 중계 서버와 VS Code Workspace 연결
+
+이 단계는 VS Code 프로젝트를 학교 에이전트의 도구 대상으로 사용할 때만 필요합니다.
+
+1. VS Code에서 작업할 프로젝트 폴더를 엽니다.
+2. School Code의 **설정** 탭에서 **연결된 프로젝트 → 프로젝트 선택**을 누릅니다.
+3. 실제 작업할 폴더를 선택합니다.
+4. **MCP 카탈로그**를 펼칩니다.
+5. **학교 Workspace → 연결**을 누릅니다. 구버전 패널에서는 **외부 MCP 연결** 버튼으로 표시될 수 있습니다.
+6. 서버 선택에서 **bcsd-nai (기본 서버)**를 선택합니다.
+7. 주소를 직접 묻는 경우 다음 기본 주소를 입력합니다.
+
+   `https://bcsd-nai.mywire.org:3010`
+
+   주소 끝에 `/health`나 `/mcp`를 붙이지 않습니다. `/health`는 상태 확인용이고 `/mcp`는 학교 리소스 등록용입니다.
+
+8. `WORKER_TOKEN` 입력창에 운영자가 개인적으로 전달한 워커 토큰을 붙여 넣습니다.
+9. VS Code 승인 창이 나오면 연결을 승인합니다.
+
+정상 상태는 다음과 같습니다.
+
+- 설정 탭의 브라우저 상태: `학교 브라우저 연결됨`
+- MCP 카탈로그의 학교 Workspace: `연결됨`
+- 프로젝트 카드의 도구 상태: `MCP 프로젝트 도구 사용 가능`
+- 채팅 탭 상단의 상태: `학교 브라우저 연결됨`
+
+Workspace 연결은 현재 **중계 서버 한 인스턴스당 VS Code 워커 한 개**만 지원합니다. 이미 다른 사람이 같은 서버에 연결한 상태라면 두 번째 사용자는 `409 Another VS Code window is connected`를 받습니다. 여러 명이 동시에 자신의 프로젝트를 연결해야 한다면 운영자가 사용자별 릴레이 인스턴스·도메인·토큰을 따로 제공해야 합니다.
+
+## 7. 학교 AI에 BCSD MCP 등록
+
+이 단계가 학교 에이전트가 BCSD 서버의 도구를 호출하도록 만드는 단계입니다.
+
+1. 학교 AI 웹사이트를 엽니다.
+2. **리소스** 또는 **Resources** 탭으로 이동합니다.
+3. **MCP**를 선택합니다.
+4. **새로 만들기**, **Add MCP**, 또는 비슷한 등록 버튼을 누릅니다.
+5. 다음처럼 입력합니다.
+
+| 항목 | 입력값 |
+|---|---|
+| 이름 | `BCSD School Code Workspace` |
+| 전송 방식 | `HTTP` 또는 `Streamable HTTP` |
+| 서버 URL | `https://bcsd-nai.mywire.org:3010/mcp` |
+| 인증 방식 | `Bearer` |
+| 토큰 | 운영자가 전달한 `MCP_TOKEN` |
+
+이 서버는 SSE 전용 주소가 아닙니다. 전송 방식에서 `SSE`만 선택하면 연결되지 않을 수 있습니다. 학교 화면이 인증 JSON을 요구하면 다음 형식으로 입력합니다.
+
+```json
+{"type":"bearer","token":"운영자가_전달한_MCP_TOKEN"}
+```
+
+화면이 헤더 직접 입력을 요구하면 다음 헤더를 사용합니다.
+
+```text
+Authorization: Bearer 운영자가_전달한_MCP_TOKEN
+```
+
+실제 토큰은 이 문서, GitHub, Discord/Slack 공개 채널, 스크린샷에 넣지 않습니다. 등록 후 **저장 → 연결 확인 → 도구 목록 새로고침**을 실행합니다.
+
+## 8. 에이전트에 MCP 연결
+
+MCP를 등록하는 것만으로 모든 에이전트가 도구를 사용하는 것은 아닙니다.
+
+1. 학교 AI의 MCP 상세 화면에서 `BCSD School Code Workspace`를 사용할 에이전트를 선택합니다.
+2. 에이전트의 연결된 리소스 또는 MCP 목록에 해당 항목이 보이는지 확인합니다.
+3. 학교 AI 에이전트 목록을 새로고침합니다.
+4. VS Code School Code의 **채팅** 탭에서 같은 에이전트를 선택합니다.
+5. 먼저 `현재 연결된 프로젝트의 이름과 사용 가능한 도구를 알려줘`라고 테스트합니다.
+
+에이전트가 `workspace_info`를 호출하면 프로젝트 이름, 도구 목록, 승인 정책이 반환됩니다. 이어서 다음처럼 테스트할 수 있습니다.
+
+```text
+현재 프로젝트에서 Assets와 Scripts 아래의 파일 구조를 요약해줘.
+```
+
+파일을 읽는 작업은 기본 승인 모드에서 VS Code에 확인 창이 표시됩니다. 파일 수정, 셸 명령, Unity 빌드/씬 변경은 쓰기 승인 대상입니다. 처음에는 **매번 확인** 또는 **읽기는 자동 승인 · 수정은 확인**을 사용하세요.
+
+## 9. 연결 구조
+
+전체 흐름은 다음과 같습니다.
+
+```text
+학교 AI 에이전트
+    │  HTTPS POST /mcp
+    │  Authorization: Bearer MCP_TOKEN
+    ▼
+https://bcsd-nai.mywire.org:3010
+    ▲
+    │  HTTPS /worker/* 장기 폴링
+    │  Authorization: Bearer WORKER_TOKEN
+    │
+VS Code School Code 워커
+    │
+    │  로그인 세션을 가진 Chrome 탭에서 실행
+    ▼
+KOREATECH 학교 AI API
+```
+
+학교 MCP 서버가 VS Code의 `localhost`에 직접 접속하는 구조가 아닙니다. VS Code가 외부 릴레이에 outbound polling으로 연결하고, 학교 에이전트의 도구 요청을 워커가 받아 처리합니다. 따라서 VS Code PC에 별도의 inbound 포트포워딩은 필요하지 않습니다. 운영자 NAS에서는 외부 HTTPS 도메인과 NAS 내부 릴레이 포트 사이의 역방향 프록시만 필요합니다.
+
+## 10. 서버 상태 확인
+
+PowerShell에서 서버가 살아 있는지 확인합니다.
+
+```powershell
+$health = Invoke-RestMethod 'https://bcsd-nai.mywire.org:3010/health'
+$health.ok
+```
+
+`True`가 나오면 릴레이 HTTP 서버가 응답한다는 뜻입니다. 이것만으로 VS Code 워커 연결이나 학교 MCP 인증까지 성공했다는 뜻은 아닙니다.
+
+`/mcp`는 인증이 필요한 POST endpoint입니다. 브라우저에서 URL을 직접 열었을 때 `401` 또는 `405`가 나와도 반드시 서버 고장은 아닙니다. 학교 MCP 등록 화면에서 `MCP_TOKEN`으로 연결 테스트를 해야 합니다.
+
+## 11. 문제 해결
+
+| 증상 | 가장 흔한 원인 | 조치 |
+|---|---|---|
+| School Code 아이콘이나 채팅 뷰가 없음 | VSIX 설치 후 창이 재로드되지 않음 | `Developer: Reload Window` 실행 후 `School Code: 채팅 열기` 실행 |
+| `브라우저 연결 대기`가 계속됨 | 학교 채팅 탭 미로그인, Connector 미로드, 로컬 네트워크 권한 거부 | 학교 채팅 URL에서 로그인 → `chrome://extensions` Connector 새로고침 → 탭 새로고침 → 연결 권한 허용 |
+| 모델 목록이 비어 있음 | 브라우저 연결 전 새로고침, 학교 세션 만료 | 설정 탭에서 브라우저 연결 후 모델·에이전트 새로고침 |
+| `/health`는 정상인데 Workspace가 연결 안 됨 | 기본 주소에 `/health`를 입력했거나 `WORKER_TOKEN`이 틀림 | VS Code에는 `https://bcsd-nai.mywire.org:3010`만 입력하고 WORKER_TOKEN 재입력 |
+| Workspace 연결 시 `401` | WORKER_TOKEN 오류 또는 프록시가 Authorization 헤더를 제거 | 운영자에게 WORKER_TOKEN 확인 요청, `/worker/heartbeat`에 Authorization 전달 여부 확인 |
+| Workspace 연결 시 `409 Another VS Code window is connected` | 같은 릴레이에 다른 워커가 이미 연결됨 | 기존 사용자가 MCP 연결을 해제하거나 운영자가 별도 릴레이를 제공해야 함 |
+| 학교 MCP 등록 시 `401` | MCP URL/토큰 오류, 두 토큰 혼동 | URL은 `/mcp`까지, 인증은 MCP_TOKEN, Bearer 형식 확인 |
+| 학교 MCP 등록 시 404 | `/health` 또는 기본 주소를 MCP URL로 등록 | `https://bcsd-nai.mywire.org:3010/mcp` 사용 |
+| 도구 목록은 보이지만 호출이 `Worker offline` | VS Code School Code가 Workspace에 연결되지 않음 | VS Code 설정 탭에서 프로젝트 선택 → 학교 Workspace 연결 → 브라우저 연결 확인 |
+| 도구 목록은 보이지만 파일이 엉뚱함 | 다른 VS Code 창/프로젝트가 워커로 연결됨 | 연결된 프로젝트 경로와 활성 VS Code 창 확인; 한 릴레이당 한 워커 원칙 적용 |
+| Unity 도구만 실패 | Unity CLI 경로 또는 Editor 브리지 미설정 | 설정 탭에서 Unity CLI 경로 설정, 필요한 경우 Unity Editor 자동 준비 실행 |
+| Chrome 탭을 여러 개 열었더니 요청이 이상함 | Connector는 학교 채팅 탭 하나만 사용 | 사용하지 않는 학교 AI 탭을 닫고 로그인 탭 하나만 새로고침 |
+
+오류를 운영자에게 보낼 때는 토큰을 포함하지 말고 다음 정보만 전달합니다.
+
+- 발생한 화면과 정확한 오류 문구
+- `health` 응답 상태 코드
+- VS Code 설정 탭의 상태 문구
+- 학교 MCP 등록 화면의 상태 코드
+- VS Code 창이 한 개인지 여부
+- 연결한 프로젝트의 이름(비밀 경로 제외)
+
+## 12. 운영자용 배포 확인
+
+서버를 직접 운영하는 경우 릴레이는 서로 다른 두 토큰으로 시작해야 합니다.
+
+```powershell
+cd tools/school-code
+npm ci
+npm run keys
+```
+
+`npm run keys`는 `.local/relay.env`에 서로 다른 `MCP_TOKEN`과 `WORKER_TOKEN`을 생성합니다. 이 파일은 Git에 추가하지 않습니다. Docker나 NAS 서비스에는 두 값을 환경 변수로 주입합니다.
+
+역방향 프록시는 다음 경로를 같은 릴레이로 전달해야 합니다.
+
+- `/health` → 상태 확인
+- `/mcp` → 학교 AI의 Streamable HTTP POST
+- `/worker/heartbeat`
+- `/worker/poll`
+- `/worker/status`
+- `/worker/result`
+- `/worker/disconnect`
+
+프록시 설정에서 `Authorization`과 `X-Worker-Id` 헤더를 보존하고, `/worker/poll`과 `/mcp` 응답 타임아웃을 최소 150초 이상으로 설정합니다. TLS 인증서는 외부에서 신뢰할 수 있어야 하며, `/mcp`와 `/worker/*`의 경로를 임의로 `/api` 아래로 바꾸거나 Authorization 헤더를 제거하면 안 됩니다.
+
+운영자는 `MCP_TOKEN`을 권한이 있는 BCSD 구성원에게만 전달할 수 있습니다. 그러나 이 MCP가 Workspace 릴레이인 경우 연결된 VS Code 프로젝트의 파일 읽기·수정·셸·Unity 도구까지 요청할 수 있습니다. 공유 대상과 승인 모드를 먼저 정하고, 구성원이 동시에 사용할 필요가 있으면 구성원별 릴레이와 토큰을 사용합니다.
+
+## 13. 최종 체크리스트
+
+- [ ] VS Code에 `skylight-local.koreatech-school-code@0.9.6`이 설치됨
+- [ ] Chrome `chrome://extensions`에 KOREATECH School Code Connector가 로드됨
+- [ ] 로그인된 `https://ai.koreatech.ac.kr/AiCA/chat` 탭이 하나 열려 있음
+- [ ] VS Code 설정 탭에서 브라우저가 `연결됨`으로 표시됨
+- [ ] 모델·에이전트 목록을 새로고침함
+- [ ] 프로젝트 폴더를 연결함
+- [ ] Workspace를 사용할 경우 `https://bcsd-nai.mywire.org:3010`과 WORKER_TOKEN을 입력함
+- [ ] 학교 AI 리소스에 `https://bcsd-nai.mywire.org:3010/mcp`를 등록함
+- [ ] 학교 MCP 인증에 MCP_TOKEN을 사용함
+- [ ] MCP를 사용할 에이전트에 연결함
+- [ ] VS Code 채팅 탭에서 같은 에이전트를 선택함
+- [ ] `workspace_info` 또는 파일 목록 질문으로 테스트함
+- [ ] 수정·셸·Unity 작업은 승인 창을 확인한 뒤 실행함
+
+## 보안 원칙
+
+`MCP_TOKEN`, `WORKER_TOKEN`, Notion Integration Secret, Unity Editor 토큰은 저장소·README·스크린샷·공개 채팅에 기록하지 않습니다. 이 문서는 주소와 절차만 공유하고 토큰은 개인 메시지나 승인된 비밀 저장소로 전달합니다. 토큰이 노출되면 운영자는 즉시 새 토큰을 생성하고 학교 MCP 등록 값과 NAS 서비스 환경 변수를 교체해야 합니다.
