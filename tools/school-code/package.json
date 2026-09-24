@@ -5,6 +5,10 @@
   "version": "0.12.0",
   "publisher": "skylight-local",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SkylightStudio07/koreatech-lxp-image-gen.git"
+  },
   "private": true,
   "engines": {
     "vscode": "^1.95.0",
@@ -140,7 +144,8 @@
     "test": "node --test test/*.test.cjs",
     "relay": "node dist/relay.cjs",
     "keys": "node scripts/keys.cjs",
-    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o school-code-0.10.0.vsix"
+    "package": "node scripts/package.cjs",
+    "package:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.0",

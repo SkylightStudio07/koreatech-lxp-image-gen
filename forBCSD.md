@@ -2,6 +2,8 @@
 
 이 문서는 BCSD 구성원이 Windows에서 **KOREATECH School Code VS Code 확장**을 설치하고, 운영 중인 `bcsd-nai` MCP 중계 서버를 학교 AI에 등록하는 전체 절차를 정리한 문서입니다. 설치만 하면 학교 AI 채팅을 VS Code에서 사용할 수 있고, MCP까지 연결하면 선택한 프로젝트의 파일·셸·Unity 도구를 학교 에이전트가 호출할 수 있습니다.
 
+구성원에게는 GitHub 저장소의 소스 링크보다 **최신 GitHub Release 페이지 링크**를 전달하세요. Release에서 `school-code-0.12.0.vsix`와 `school-code-connector-0.2.0.zip`을 내려받아 설치하면 됩니다. 저장소 소스는 개발·검토용이고, Release 첨부 파일이 일반 구성원의 설치용입니다.
+
 이 문서에서 말하는 서버 주소는 현재 BCSD 서버 기준입니다. 0.10.0부터는 구성원이 정적 토큰을 복사하지 않고 BCSD 계정으로 브라우저 승인하는 개인 페어링 방식이 권장됩니다.
 
 | 용도 | 주소 |
@@ -42,49 +44,52 @@ VS Code 안에 채팅 화면과 프로젝트 도구를 설치하는 확장입니
 - Chrome
 - KOREATECH 학교 AI 계정
 - BCSD 릴레이에 등록된 계정(처음이면 브라우저에서 가입)
-- 저장소의 `tools/school-code/school-code-0.10.0.vsix`
+- 최신 GitHub Release의 `school-code-0.12.0.vsix`
+- 최신 GitHub Release의 `school-code-connector-0.2.0.zip`
 
 채팅만 사용할 사람은 MCP 토큰이나 Workspace 토큰 없이도 학교 브라우저 연결과 모델 대화까지 설정할 수 있습니다. 프로젝트 파일·Unity·셸 도구를 사용할 사람은 아래 절차를 끝까지 진행해야 합니다.
 
 ## 3. VS Code 확장 설치
 
-### 방법 A: 저장소에서 설치
+### 방법 A: Release에서 VSIX 설치 (권장)
+
+최신 Release에서 VSIX를 내려받은 뒤 파일을 VS Code 창으로 끌어 놓거나 명령 팔레트의 **Extensions: Install from VSIX...**로 설치합니다. 설치 후 **Developer: Reload Window**를 실행합니다.
+
+### 방법 B: 저장소에서 직접 설치
 
 PowerShell에서 저장소 루트로 이동한 뒤 VSIX를 설치합니다.
 
 ```powershell
 cd G:\Koreatech-Codex\school-ai
-code --install-extension .\tools\school-code\school-code-0.10.0.vsix --force
+code --install-extension .\tools\school-code\school-code-0.12.0.vsix --force
 code --list-extensions --show-versions | Select-String koreatech-school-code
 ```
 
 정상 결과에는 다음과 비슷한 항목이 표시됩니다.
 
 ```text
-skylight-local.koreatech-school-code@0.10.0
+skylight-local.koreatech-school-code@0.12.0
 ```
 
 VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **Shell Command: Install 'code' command in PATH**를 실행하거나, VSIX 파일을 VS Code 창으로 끌어 놓아 설치합니다.
 
-### 방법 B: VSIX 파일 직접 설치
+### 방법 C: VSIX 파일 직접 선택
 
 1. VS Code를 엽니다.
 2. `Ctrl+Shift+P`를 누릅니다.
 3. **Extensions: Install from VSIX...**를 선택합니다.
-4. `tools/school-code/school-code-0.10.0.vsix`를 선택합니다.
+4. Release에서 내려받은 `school-code-0.12.0.vsix`를 선택합니다.
 5. 설치가 끝나면 **Developer: Reload Window**를 실행합니다.
 
 설치 후 왼쪽 Activity Bar에서 `School Code` 아이콘을 선택하고 **학교 AI** 뷰를 엽니다. 아이콘이 보이지 않으면 명령 팔레트에서 **School Code: 채팅 열기**를 실행합니다.
 
 ## 4. Chrome Connector 설치
 
-1. School Code 패널의 **설정** 탭을 엽니다.
-2. **연결 및 외부 MCP**를 펼칩니다.
-3. **Chrome 확장 폴더 열기**를 누릅니다.
-4. Chrome 주소창에 `chrome://extensions`를 입력합니다.
-5. 오른쪽 위 **개발자 모드**를 켭니다.
-6. **압축해제된 확장 프로그램을 로드**를 누릅니다.
-7. VS Code가 열어 준 `tools/school-code/chrome-extension` 폴더를 선택합니다.
+1. 최신 Release의 `school-code-connector-0.2.0.zip`을 압축 해제합니다. 또는 School Code 패널의 **설정 → 연결 및 외부 MCP → Chrome 확장 폴더 열기**로 설치된 VSIX 안의 폴더를 엽니다.
+2. Chrome 주소창에 `chrome://extensions`를 입력합니다.
+3. 오른쪽 위 **개발자 모드**를 켭니다.
+4. **압축해제된 확장 프로그램을 로드**를 누릅니다.
+5. 압축 해제한 `chrome-extension` 폴더(또는 VS Code가 연 폴더)를 선택합니다.
 
 이미 설치되어 있다면 새로 설치하지 말고 `chrome://extensions`의 **새로고침** 버튼을 누릅니다. Chrome Connector를 삭제하면 안 됩니다. School Code 확장은 이 Connector가 로그인된 학교 탭에 주입하는 워커를 통해 학교 API를 호출합니다.
 
@@ -282,7 +287,7 @@ Docker Compose를 쓰면 `/data`를 NAS의 별도 쓰기 가능한 `auth-data` �
 
 ## 13. 최종 체크리스트
 
-- [ ] VS Code에 `skylight-local.koreatech-school-code@0.10.0`이 설치됨
+- [ ] VS Code에 `skylight-local.koreatech-school-code@0.12.0`이 설치됨
 - [ ] Chrome `chrome://extensions`에 KOREATECH School Code Connector가 로드됨
 - [ ] 로그인된 `https://ai.koreatech.ac.kr/AiCA/chat` 탭이 하나 열려 있음
 - [ ] VS Code 설정 탭에서 브라우저가 `연결됨`으로 표시됨
