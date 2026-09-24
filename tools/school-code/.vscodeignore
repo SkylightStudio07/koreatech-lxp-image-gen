@@ -6,5 +6,6 @@ deploy/**
 .local/**
 *.vsix
 *.zip
+SHA256SUMS.txt
 package-lock.json
 dist/relay.cjs

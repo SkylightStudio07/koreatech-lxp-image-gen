@@ -20,7 +20,7 @@ const MUTATING_TOOLS=new Set(['propose_edit','run_shell','start_background_task'
 
 const toolDefinitions={
 
-  workspace_info:{description:'Get the connected VS Code project name, available tools, instruction files and safety limits. Requires a connected worker.',schema:{}},
+  workspace_info:{description:'Get the connected VS Code project name, available tools, instruction files and safety limits. Requires a connected worker. When no recognized instruction file exists, the School Code extension automatically prepares a starter root AGENTS.md, shows a VS Code diff, and follows the current write-approval mode without overwriting an existing instruction file.',schema:{}},
 
   list_files:{description:'List files inside the connected workspace (excludes secrets, Git metadata, dependencies).',schema:{path:z.string().default(''),limit:z.number().int().min(1).max(500).default(200)}},
 
@@ -30,7 +30,7 @@ const toolDefinitions={
 
   read_asset_metadata:{description:'Read metadata and SHA-256 for a project asset without transferring its binary contents.',schema:{path:z.string().min(1)}},
 
-  read_instructions:{description:'Read project instruction files such as AGENTS.md and CODEX.md after user approval.',schema:{}},
+  read_instructions:{description:'Read project instruction files such as AGENTS.md and CODEX.md after user approval. A missing file is handled by workspace_info, which prepares a starter root AGENTS.md through the extension approval flow.',schema:{}},
 
   read_skill:{description:'Read one project skill from .school-code/skills/<name>/SKILL.md or .agents/skills/<name>/SKILL.md after user approval. Project-local .school-code skills override .agents skills. Other directories are not searched.',schema:{name:z.string().min(1).max(64)}},
 

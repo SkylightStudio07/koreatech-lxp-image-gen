@@ -18,6 +18,17 @@ const {runShell,TaskManager}=require('./harness.cjs');
 const {compactMessages,estimateMessages,threshold:compactThreshold}=require('./compaction.cjs');
 const {McpRegistry}=require('./mcp-registry.cjs');
 const DEFAULT_RELAY_URL='https://bcsd-nai.mywire.org:3010';
+const STARTER_INSTRUCTIONS=`# Project Instructions
+
+This file was created automatically when School Code connected this project.
+
+- Inspect the project structure and existing documentation before making changes.
+- Prefer small, reviewable changes and explain what was changed and how it was checked.
+- Use the project's existing scripts, conventions, and dependencies where possible.
+- Ask before destructive, broad, or irreversible operations.
+- Keep secrets, credentials, generated output, and unrelated files out of changes.
+- For Unity projects, preserve the project's Unity version and validate changes with the configured Unity tools.
+`;
 
 function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
@@ -360,15 +371,48 @@ function activate(context){
     if(state.approvalMode==='full'||(state.approvalMode==='read'&&!write))return true;
     return await vscode.window.showWarningMessage(detail,{modal:true},'승인')==='승인';
   }
+  async function applyFileProposal(root,args,ensureActive,detail='학교 AI가 파일 수정을 제안했습니다.'){
+    if(typeof args.content!=='string'||args.content.length>200000)throw Error('파일 내용은 200,000자 이하여야 합니다.');
+    const relative=String(args.path||'');
+    const target=await workspace.safePath(root,relative,{create:true});let before=null;
+    let exists=true;try{await fs.lstat(target);}catch(e){if(e.code==='ENOENT')exists=false;else throw e;}if(exists)before=await workspace.readText(root,relative);
+    if(before&&args.expected_sha256!==before.hash)throw Error('read_file의 최신 sha256을 expected_sha256에 지정하세요.');
+    const open=vscode.workspace.textDocuments.find(d=>d.uri.fsPath===target);if(open?.isDirty)throw Error('저장되지 않은 편집이 있습니다. 먼저 저장하세요.');
+    const id=randomUUID(),left=vscode.Uri.parse(`school-code-preview:/${id}/before/${encodeURIComponent(relative)}`),right=vscode.Uri.parse(`school-code-preview:/${id}/after/${encodeURIComponent(relative)}`);
+    previews.set(left.toString(),before?.text||'');previews.set(right.toString(),args.content);
+    try{
+      await vscode.commands.executeCommand('vscode.diff',left,right,`학교 AI 수정안: ${relative}`);
+      if(!await approval(`${detail}\ndiff를 확인한 뒤 ${relative} ${before?'수정':'생성'}을 승인하세요.`,{write:true}))throw Error('사용자가 수정을 거절했습니다.');
+      await ensureActive();
+      await workspace.safePath(root,relative,{create:!before});
+      if(before){const latest=await workspace.readText(root,relative);if(latest.hash!==before.hash)throw Error('검토 중 파일이 변경되었습니다.');}
+      if(vscode.workspace.textDocuments.find(d=>d.uri.fsPath===target)?.isDirty)throw Error('검토 중 편집기가 변경되었습니다.');
+      await ensureActive();
+      const edit=new vscode.WorkspaceEdit(),uri=vscode.Uri.file(target);
+      if(!before)edit.createFile(uri,{overwrite:false});
+      const doc=before?await vscode.workspace.openTextDocument(uri):null;
+      edit.replace(uri,doc?new vscode.Range(doc.positionAt(0),doc.positionAt(doc.getText().length)):new vscode.Range(0,0,0,0),args.content);
+      if(!await vscode.workspace.applyEdit(edit))throw Error('수정 적용 실패');
+      const changed=await vscode.workspace.openTextDocument(uri);await vscode.window.showTextDocument(changed);if(!await changed.save())throw Error('편집기에 적용했으나 저장 실패');
+      return {applied:true,path:relative,sha256:workspace.sha(Buffer.from(args.content))};
+    }finally{previews.delete(left.toString());previews.delete(right.toString());}
+  }
+  async function ensureStarterInstructions(root,ensureActive){
+    const existing=await workspace.readInstructions(root);if(existing.files.length)return {attempted:false,created:false};
+    try{
+      const result=await applyFileProposal(root,{path:'AGENTS.md',content:STARTER_INSTRUCTIONS},ensureActive,'프로젝트 지침 파일이 없어 School Code가 기본 AGENTS.md 생성을 준비했습니다.');
+      return {attempted:true,created:true,path:result.path};
+    }catch(e){return {attempted:true,created:false,error:String(e.message||e).slice(0,240)};}
+  }
   async function executeTool(job,isActive,ensureActive){
     if(!vscode.workspace.isTrusted||!relayRoot||!isActive())throw Error('작업 영역 연결이 종료되었습니다.');
     const workspaceConnection=mcpRegistry.get('school-workspace');if(workspaceConnection?.enabled===false)throw Error('학교 Workspace MCP가 꺼져 있습니다. 패널에서 다시 켜세요.');
     const root=relayRoot,args=job.args||{};
     const notionTool=job.name.startsWith('notion_');
     if(job.name==='workspace_info'){
-      const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
+      const setup=await ensureStarterInstructions(root,ensureActive);const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
        const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
-       return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+       return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
@@ -431,29 +475,7 @@ function activate(context){
       if(job.name==='read_asset_metadata')return workspace.readAssetMetadata(root,args.path);
       return workspace.readInstructions(root);
     }
-    if(typeof args.content!=='string'||args.content.length>200000)throw Error('파일 내용은 200,000자 이하여야 합니다.');
-    const target=await workspace.safePath(root,args.path,{create:true});let before=null;
-    let exists=true;try{await fs.lstat(target);}catch(e){if(e.code==='ENOENT')exists=false;else throw e;}if(exists)before=await workspace.readText(root,args.path);
-    if(before&&args.expected_sha256!==before.hash)throw Error('read_file의 최신 sha256을 expected_sha256에 지정하세요.');
-    const open=vscode.workspace.textDocuments.find(d=>d.uri.fsPath===target);if(open?.isDirty)throw Error('저장되지 않은 편집이 있습니다. 먼저 저장하세요.');
-    const id=randomUUID(),left=vscode.Uri.parse(`school-code-preview:/${id}/before/${encodeURIComponent(args.path)}`),right=vscode.Uri.parse(`school-code-preview:/${id}/after/${encodeURIComponent(args.path)}`);
-    previews.set(left.toString(),before?.text||'');previews.set(right.toString(),args.content);
-    try{
-      await vscode.commands.executeCommand('vscode.diff',left,right,`학교 AI 수정안: ${args.path}`);
-      if(!await approval(`diff를 확인한 뒤 ${args.path} ${before?'수정':'생성'}을 승인하세요.`,{write:true}))throw Error('사용자가 수정을 거절했습니다.');
-      await ensureActive();
-      await workspace.safePath(root,args.path,{create:!before});
-      if(before){const latest=await workspace.readText(root,args.path);if(latest.hash!==before.hash)throw Error('검토 중 파일이 변경되었습니다.');}
-      if(vscode.workspace.textDocuments.find(d=>d.uri.fsPath===target)?.isDirty)throw Error('검토 중 편집기가 변경되었습니다.');
-      await ensureActive();
-      const edit=new vscode.WorkspaceEdit(),uri=vscode.Uri.file(target);
-      if(!before)edit.createFile(uri,{overwrite:false});
-      const doc=before?await vscode.workspace.openTextDocument(uri):null;
-      edit.replace(uri,doc?new vscode.Range(doc.positionAt(0),doc.positionAt(doc.getText().length)):new vscode.Range(0,0,0,0),args.content);
-      if(!await vscode.workspace.applyEdit(edit))throw Error('수정 적용 실패');
-      const changed=await vscode.workspace.openTextDocument(uri);await vscode.window.showTextDocument(changed);if(!await changed.save())throw Error('편집기에 적용했으나 저장 실패');
-      return {applied:true,path:args.path,sha256:workspace.sha(Buffer.from(args.content))};
-    }finally{previews.delete(left.toString());previews.delete(right.toString());}
+    return applyFileProposal(root,args,ensureActive);
   }
   function relayPairKeys(url,project){const workspaceId=createHash('sha256').update(project.path).digest('hex').slice(0,32);return {workspaceId,workerKey:`relay:${url}:pair:${workspaceId}`,mcpKey:`relay:${url}:pair:${workspaceId}:mcp`};}
   async function pairRelay(url,project,{force=false}={}){
