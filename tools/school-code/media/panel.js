@@ -308,6 +308,8 @@ window.addEventListener('message', ({ data: m }) => {
     const agentPlaceholder = document.createElement('option'); agentPlaceholder.value = ''; agentPlaceholder.textContent = '에이전트를 선택하세요'; $('agent').append(agentPlaceholder);
     for (const x of agents) { const option = document.createElement('option'); option.value = x.id; option.textContent = x.name || x.id; $('agent').append(option); }
     $('model').value = m.state.model || ''; $('agent').value = m.state.agent || '';
+    const hint = $('routingHint');
+    if (hint) hint.textContent = m.state.agent ? '에이전트가 응답 모델과 도구를 결정합니다. 모델 선택은 보존되며 에이전트 해제 시 사용됩니다.' : m.state.model ? '선택한 모델로 직접 응답합니다.' : '모델과 에이전트를 각각 선택할 수 있습니다.';
     $('mode').value = m.state.mode; $('approvalMode').value = m.state.approvalMode || 'ask'; $('contextCompaction').checked = m.state.contextCompaction === true; $('compactionThreshold').value = String(m.state.compactionThreshold || 60000); $('compactionThreshold').disabled = !$('contextCompaction').checked || busy; $('mode').disabled = !!m.state.agent || busy; $('approvalMode').disabled = busy; $('contextCompaction').disabled = busy; $('model').disabled = busy; $('agent').disabled = busy; $('send').disabled = busy; $('new').disabled = busy; $('sessionNew').disabled = busy; $('sessionRename').disabled = busy; $('stop').hidden = !busy; uploadDropzone.classList.toggle('disabled', busy); uploadDropzone.setAttribute('aria-disabled', busy ? 'true' : 'false'); renderDraftUploads(); renderProject(m); render();
   }
   if (m.type === 'stream') { const last = messages.at(-1); if (last?.role === 'assistant') { last.text = m.text; last.status = m.status; render(); } }

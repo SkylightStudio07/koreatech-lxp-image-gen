@@ -299,9 +299,13 @@ function activate(context){
     if(unityPathConfigured()&&!mcpRegistry.get('unity-cli')){mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});changed=true;}
     if(changed){await mcpRegistry.save();snapshot();}
   }
+  function configuredRelayUrl(){
+    const config=vscode.workspace.getConfiguration('schoolCode');
+    return context.globalState?.get?.('schoolCode.relayUrl')||config.get('relayUrl',DEFAULT_RELAY_URL)||DEFAULT_RELAY_URL;
+  }
   async function chooseRelayUrl(){
     const config=vscode.workspace.getConfiguration('schoolCode');
-    const saved=context.globalState?.get?.('schoolCode.relayUrl')||config.get('relayUrl',DEFAULT_RELAY_URL)||DEFAULT_RELAY_URL;
+    const saved=configuredRelayUrl();
     if(typeof vscode.window.showQuickPick!=='function')return vscode.window.showInputBox({title:'MCP 중계 서버 주소',value:saved,prompt:'기본값은 bcsd-nai입니다. HTTPS 주소 또는 로컬 테스트용 http://127.0.0.1:18880'});
     const options=[{label:'bcsd-nai (기본 서버)',description:DEFAULT_RELAY_URL,value:DEFAULT_RELAY_URL}];
     if(saved&&saved!==DEFAULT_RELAY_URL)options.push({label:'현재 사용자 지정 서버',description:saved,value:saved});
@@ -476,16 +480,18 @@ function activate(context){
     const value=JSON.stringify({type:'bearer',token});if(!vscode.env?.clipboard?.writeText)throw Error('VS Code 클립보드를 사용할 수 없습니다.');await vscode.env.clipboard.writeText(value);await vscode.window.showInformationMessage('학교 MCP 인증 JSON을 클립보드에 복사했습니다. 학교 리소스 → MCP에 붙여 넣으세요.');
   }
   async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
-  async function connectRelay({forcePair=false}={}){
+  async function connectRelay({forcePair=false,auto=false}={}){
     if(relayController)return vscode.window.showInformationMessage('이미 연결 중입니다. 먼저 외부 MCP 연결을 해제하세요.');
     if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역이 필요합니다.');
     const project=await projectContext.ensure();relayError='';snapshot();
-    const raw=await chooseRelayUrl();if(!raw)return;
+    const raw=auto?configuredRelayUrl():await chooseRelayUrl();if(!raw)return;
     const u=new URL(raw);if(u.username||u.password||u.search||u.hash||u.pathname!=='/'||!(u.protocol==='https:'||u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error('HTTPS 서버 기본 주소를 입력하세요.');const url=u.origin;
     const key='relay:'+url;let token=await context.secrets.get(key),mcpToken=await context.secrets.get(`${key}:mcp`);let pairMode=typeof vscode.window.showQuickPick==='function';
-    if(pairMode){const selected=await vscode.window.showQuickPick([{label:'BCSD 계정으로 브라우저 승인',description:'로그인 후 개인 토큰을 자동 발급합니다.',value:'pair'},{label:'수동 WORKER_TOKEN 입력',description:'기존 공용 토큰 호환 모드',value:'manual'}],{title:'Workspace MCP 인증 방식',placeHolder:'권장: BCSD 계정으로 브라우저 승인',ignoreFocusOut:true});if(!selected)return;pairMode=selected.value==='pair';}
-    if(!await approval(`${project.name}을 ${url}에 연결합니다. 학교 AI가 파일 도구를 요청할 수 있으며, 읽기/검색/수정은 건별로 승인합니다.`))return;
-    if(pairMode){const credentials=await pairRelay(url,project,{force:forcePair});token=credentials.workerToken;mcpToken=credentials.mcpToken;}else{token=await vscode.window.showInputBox({title:'중계 서버 WORKER_TOKEN',password:true,value:token||'',ignoreFocusOut:true});if(!token)return;if(token.length<32)throw Error('32자 이상 토큰이 필요합니다.');}
+    if(auto){if(!token||token.length<32)return;pairMode=false;}
+    else if(!forcePair&&token&&token.length>=32){pairMode=false;}
+    else if(pairMode){const selected=await vscode.window.showQuickPick([{label:'BCSD 계정으로 브라우저 승인',description:'로그인 후 개인 토큰을 자동 발급합니다.',value:'pair'},{label:'수동 WORKER_TOKEN 입력',description:'기존 공용 토큰 호환 모드',value:'manual'}],{title:'Workspace MCP 인증 방식',placeHolder:'권장: BCSD 계정으로 브라우저 승인',ignoreFocusOut:true});if(!selected)return;pairMode=selected.value==='pair';}
+    if(!auto&&!await approval(`${project.name}을 ${url}에 연결합니다. 학교 AI가 파일 도구를 요청할 수 있으며, 읽기/검색/수정은 건별로 승인합니다.`))return;
+    if(pairMode){const credentials=await pairRelay(url,project,{force:forcePair});token=credentials.workerToken;mcpToken=credentials.mcpToken;}else if(!token){token=await vscode.window.showInputBox({title:'중계 서버 WORKER_TOKEN',password:true,value:'',ignoreFocusOut:true});if(!token)return;if(token.length<32)throw Error('32자 이상 토큰이 필요합니다.');}
     if(projectContext.project!==project)throw Error('프로젝트가 변경되었습니다. MCP를 다시 연결하세요.');
     await context.secrets.store(key,token);relayRoot=project.path;const ctl=relayController=new AbortController();const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','X-Worker-Id':randomUUID()};relaySession={url,headers};
     const call=async(route,body,timeout=30000)=>{const r=await fetch(url+route,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.any([ctl.signal,AbortSignal.timeout(timeout)])});if(!r.ok)throw Error(`중계 HTTP ${r.status}`);return r.json();};
@@ -533,6 +539,12 @@ function activate(context){
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
   for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.repairRelay':()=>connectRelay({forcePair:true}),'schoolCode.copyMcpAuth':copyMcpAuth,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
   const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();for(const c of uploadControllers.values())c.abort();uploadControllers.clear();void disconnectRelay();void taskManager.dispose();}});
+  async function autoReconnectRelay(){
+    if(!vscode.workspace.isTrusted||!vscode.workspace.workspaceFolders?.length)return;
+    try{await connectRelay({auto:true});}
+    catch(e){relayError=String(e.message||'저장된 Workspace 연결을 복원하지 못했습니다.').slice(0,200);output.appendLine(`자동 재연결 실패: ${relayError}`);snapshot();}
+  }
   void hydrateMcpRegistry();
+  void autoReconnectRelay();
 }
 module.exports={activate};
