@@ -21,7 +21,9 @@ test('pairing issues per-user tokens and keeps workspace jobs isolated',async t=
   async function pair(username,workspace){
     const start=await fetch(base+'/auth/pair/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspaceId:workspace,workspaceName:workspace,deviceId:randomUUID()})});const pending=await start.json();
     const register=await fetch(base+'/auth/register',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code:pending.code,username,password:'password123'})});assert.equal(register.status,303);
-    const status=await (await fetch(`${base}/auth/pair/status?pair_id=${pending.pairId}&secret=${pending.pairSecret}`)).json();assert.equal(status.status,'approved');assert(status.workerToken&&status.mcpToken);return {...status,cookie:register.headers.get('set-cookie')};
+    const status=await (await fetch(`${base}/auth/pair/status?pair_id=${pending.pairId}&secret=${pending.pairSecret}`)).json();assert.equal(status.status,'approved');assert(status.workerToken&&status.mcpToken);
+    const retry=await (await fetch(`${base}/auth/pair/status?pair_id=${pending.pairId}&secret=${pending.pairSecret}`)).json();assert.deepEqual({workerToken:retry.workerToken,mcpToken:retry.mcpToken},{workerToken:status.workerToken,mcpToken:status.mcpToken});
+    return {...status,cookie:register.headers.get('set-cookie')};
   }
   const alice=await pair('alice','workspace-a'),bob=await pair('bob','workspace-b');
   const aliceWorker={Authorization:'Bearer '+alice.workerToken,'X-Worker-Id':randomUUID(),'Content-Type':'application/json'},bobWorker={Authorization:'Bearer '+bob.workerToken,'X-Worker-Id':randomUUID(),'Content-Type':'application/json'};

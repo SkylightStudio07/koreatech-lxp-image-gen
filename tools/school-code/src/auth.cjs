@@ -199,9 +199,12 @@ class RelayAuthStore {
     if (!pair.userId) return { status: 'pending', expiresAt: pair.expiresAt };
     if (!pair.raw) this.issuePairTokens(pair);
     if (!pair.raw) return { status: 'approved', expiresAt: pair.expiresAt };
-    const raw = pair.raw;
-    delete pair.raw;
-    return { status: 'approved', expiresAt: pair.expiresAt, ...raw };
+    // Keep the raw values available for the lifetime of this short-lived pair.
+    // The extension may lose a single polling response while the browser is
+    // approving the device; returning the same values lets it retry safely
+    // with the pair secret instead of getting an approved response without a
+    // token. The pair secret is high-entropy and the pair expires shortly.
+    return { status: 'approved', expiresAt: pair.expiresAt, ...pair.raw };
   }
 
   verifyToken(raw, kind) {
@@ -223,12 +226,14 @@ class RelayAuthStore {
   }
 }
 
-function pairingPage({ code, user, error = '', expiresAt = 0 }) {
+function pairingPage({ code, user, approved = false, error = '', expiresAt = 0 }) {
   const message = error ? `<p class="error">${htmlEscape(error)}</p>` : '';
   const login = user
-    ? `<p>로그인: <strong>${htmlEscape(user.username)}</strong></p><form method="post" action="/auth/pair/approve"><input type="hidden" name="code" value="${htmlEscape(code)}"><button>이 기기를 연결</button></form><form method="post" action="/auth/logout"><button class="secondary">로그아웃</button></form>`
+    ? approved
+      ? `<p>로그인: <strong>${htmlEscape(user.username)}</strong></p><p class="success">이 기기가 연결되었습니다. VS Code로 돌아가면 Workspace가 자동으로 연결됩니다.</p><form method="post" action="/auth/logout"><button class="secondary">로그아웃</button></form>`
+      : `<p>로그인: <strong>${htmlEscape(user.username)}</strong></p><form method="post" action="/auth/pair/approve"><input type="hidden" name="code" value="${htmlEscape(code)}"><button>이 기기를 연결</button></form><form method="post" action="/auth/logout"><button class="secondary">로그아웃</button></form>`
     : `<h2>BCSD 계정으로 로그인</h2><form method="post" action="/auth/login"><input type="hidden" name="code" value="${htmlEscape(code)}"><label>아이디<input name="username" autocomplete="username" required></label><label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label><button>로그인 후 연결</button></form><hr><h2>처음 사용하나요?</h2><form method="post" action="/auth/register"><input type="hidden" name="code" value="${htmlEscape(code)}"><label>아이디<input name="username" autocomplete="username" required></label><label>비밀번호<input name="password" type="password" autocomplete="new-password" required></label><label>가입 코드(필요한 경우)<input name="registrationCode"></label><button>가입 후 연결</button></form>`;
-  return `<!doctype html><meta charset="utf-8"><title>School Code 연결</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5}form{display:grid;gap:.7rem}label{display:grid;gap:.2rem}input{font:inherit;padding:.5rem;border:1px solid #bbb;border-radius:.4rem}button{font:inherit;padding:.6rem;border:0;border-radius:.4rem;background:#2563eb;color:white;cursor:pointer}.secondary{background:#666}.error{color:#b91c1c}.code{font-size:2rem;letter-spacing:.2em}</style><h1>School Code 연결</h1><p>VS Code에서 요청한 연결입니다. 아래 코드를 확인하세요.</p><p class="code"><strong>${htmlEscape(code)}</strong></p><p>유효 시간: ${Math.max(0, Math.ceil((expiresAt - Date.now()) / 60000))}분</p>${message}${login}`;
+  return `<!doctype html><meta charset="utf-8"><title>School Code 연결</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5}form{display:grid;gap:.7rem}label{display:grid;gap:.2rem}input{font:inherit;padding:.5rem;border:1px solid #bbb;border-radius:.4rem}button{font:inherit;padding:.6rem;border:0;border-radius:.4rem;background:#2563eb;color:white;cursor:pointer}.secondary{background:#666}.error{color:#b91c1c}.success{color:#166534;font-weight:600}.code{font-size:2rem;letter-spacing:.2em}</style><h1>School Code 연결</h1><p>VS Code에서 요청한 연결입니다. 아래 코드를 확인하세요.</p><p class="code"><strong>${htmlEscape(code)}</strong></p><p>유효 시간: ${Math.max(0, Math.ceil((expiresAt - Date.now()) / 60000))}분</p>${message}${login}`;
 }
 
 module.exports = { RelayAuthStore, SESSION_COOKIE, encodeCookie, pairingPage, digest };

@@ -101,7 +101,7 @@ $("prompt").addEventListener('paste', e => {
 });
 
 function mcpStatus(status) {
-  return ({ connected: '연결됨', configured: '설정됨', error: '오류', 'not-connected': '연결 안 됨', 'not-configured': '미설정', disabled: '꺼짐' })[status] || status || '미설정';
+  return ({ connected: '연결됨', pending: '승인 대기 중', configured: '설정됨', error: '오류', 'not-connected': '연결 안 됨', 'not-configured': '미설정', disabled: '꺼짐' })[status] || status || '미설정';
 }
 
 function renderMcp(m) {
@@ -115,7 +115,7 @@ function renderMcp(m) {
     const info = document.createElement('div'); info.className = 'mcp-info';
     const title = document.createElement('strong'); title.textContent = item.name;
     const desc = document.createElement('small'); desc.textContent = item.error ? `${item.description} · ${item.error}` : item.description;
-    const status = document.createElement('span'); status.className = 'mcp-status' + (item.status === 'error' ? ' error' : ''); status.textContent = mcpStatus(item.enabled === false ? 'disabled' : item.status);
+    const status = document.createElement('span'); status.className = 'mcp-status' + (item.status === 'error' ? ' error' : '') + (item.status === 'pending' ? ' pending' : ''); status.textContent = mcpStatus(item.enabled === false ? 'disabled' : item.status);
     info.append(title, desc, status);
     const actions = document.createElement('div'); actions.className = 'mcp-actions';
     const configure = document.createElement('button'); configure.textContent = item.id === 'unity-cli' ? '경로 설정' : item.id === 'unity-editor' ? '자동 준비' : item.configured ? '설정' : '연결'; configure.title = item.description; configure.disabled = !!m.busy; configure.addEventListener('click', () => vscode.postMessage({ type: 'mcpConfigure', id: item.id }));
@@ -217,7 +217,7 @@ function connection(m) {
   if (sessionConnection) sessionConnection.textContent = m.error || (m.connected ? '학교 브라우저 연결됨' : '브라우저 연결 대기');
   const sessionConnect = $('sessionConnect');
   if (sessionConnect) sessionConnect.textContent = m.connected ? '설정' : '연결';
-  $('relayState').textContent = m.relay ? '학교 Workspace 연결됨 · 도구별 승인' : m.relayError ? `학교 Workspace 오류 · ${m.relayError}` : '학교 Workspace 연결 안 됨';
+  $('relayState').textContent = m.relay ? '학교 Workspace 연결됨 · 도구별 승인' : m.relayPending ? `브라우저 승인 대기 중${m.relayPairCode ? ` · 코드 ${m.relayPairCode}` : ''}` : m.relayError ? `학교 Workspace 오류 · ${m.relayError}` : '학교 Workspace 연결 안 됨';
   const tool = $('toolState');
   if (!tool || !m.projectContext) return;
   const project = m.projectContext.project, agent = m.state?.agent;

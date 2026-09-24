@@ -34,7 +34,7 @@ function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
   const port=vscode.workspace.getConfiguration('schoolCode').get('bridgePort',18766);
   const bridge=new BrowserBridge(port);let bridgeError='';const ready=bridge.start().catch(e=>{bridgeError=e.code==='EADDRINUSE'?'브리지 포트가 사용 중입니다. 다른 VS Code 창을 닫거나 bridgePort를 변경하세요.':e.message;output.appendLine(bridgeError);});context.subscriptions.push({dispose:()=>bridge.dispose()});
-  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',unityEditorConnected=false,projectBusy=false;
+  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',relayPending=false,relayPairCode='',relayPairPromise=null,relayPairAbort=null,unityEditorConnected=false,projectBusy=false;
   const imagePreviews=new Map(),imageLoads=new Map();
   const uploadCache=new Map(),uploadControllers=new Map();
   const MAX_UPLOADS=5,MAX_UPLOAD_BYTES=32*1024*1024,MAX_UPLOAD_BASE64=45*1024*1024;
@@ -62,14 +62,14 @@ function activate(context){
     const unityEditorConfigured=!!mcpRegistry.get('unity-editor');
     return mcpRegistry.list().map(item=>{
       let configured=item.configured,status=item.configured?'configured':'not-configured';
-      if(item.id==='school-workspace'){configured=configured||relayConnected;status=relayConnected?'connected':relayError?'error':configured?'configured':'not-connected';}
+      if(item.id==='school-workspace'){configured=configured||relayConnected||relayPending;status=relayConnected?'connected':relayPending?'pending':relayError?'error':configured?'configured':'not-connected';}
       if(item.id==='notion'){configured=notionConfigured;status=configured?'configured':'not-configured';}
       if(item.id==='unity-cli'){configured=unityPathConfigured()||!!mcpRegistry.get('unity-cli');status=configured?'configured':'not-configured';}
       if(item.id==='unity-editor'){configured=unityEditorConfigured;status=unityEditorConnected?'connected':configured?'configured':'not-configured';}
       return {...item,configured,status,error:item.id==='school-workspace'?relayError:''};
     });
   }
-  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,relayError,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
+  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,relayPending,relayPairCode,relayError,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
   function cleanAttachments(value){
     const list=Array.isArray(value)?value:[];
     return list.map(a=>{
@@ -479,20 +479,25 @@ function activate(context){
   }
   function relayPairKeys(url,project){const workspaceId=createHash('sha256').update(project.path).digest('hex').slice(0,32);return {workspaceId,workerKey:`relay:${url}:pair:${workspaceId}`,mcpKey:`relay:${url}:pair:${workspaceId}:mcp`};}
   async function pairRelay(url,project,{force=false}={}){
+    if(relayPairPromise)return relayPairPromise;
+    const pairAbort=new AbortController();relayPairAbort=pairAbort;
+    const run=(async()=>{
     const {workspaceId,workerKey,mcpKey}=relayPairKeys(url,project),savedWorker=await context.secrets.get(workerKey),savedMcp=await context.secrets.get(mcpKey);
     if(savedWorker&&!force)return {workerToken:savedWorker,mcpToken:savedMcp||''};
+    relayPending=true;relayPairCode='';relayError='';snapshot();
     output.appendLine(`Workspace 페어링 시작: ${url} · ${project.name}`);post({type:'notice',text:'브라우저에서 BCSD 계정 승인을 기다리는 중입니다.'});
-    const response=await fetch(url+'/auth/pair/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspaceId,workspaceName:project.name,deviceId:randomUUID()}),redirect:'error',signal:AbortSignal.timeout(15000)});
+    const response=await fetch(url+'/auth/pair/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspaceId,workspaceName:project.name,deviceId:randomUUID()}),redirect:'error',signal:AbortSignal.any([pairAbort.signal,AbortSignal.timeout(15000)])});
     if(!response.ok)throw Error(`페어링 시작 실패 (HTTP ${response.status})`);const pair=await response.json();
     if(!pair.pairId||!pair.pairSecret||!pair.approvalUrl)throw Error('중계 서버가 올바른 페어링 정보를 반환하지 않았습니다.');
-    output.appendLine(`페어링 코드가 발급되었습니다. 브라우저 승인 대기 중 (10분 제한)`);
+    relayPairCode=pair.code;relayPending=true;output.appendLine(`페어링 코드가 발급되었습니다: ${pair.code}. 브라우저 승인 대기 중 (10분 제한)`);snapshot();
     if(vscode.env?.openExternal&&vscode.Uri?.parse)await vscode.env.openExternal(vscode.Uri.parse(pair.approvalUrl));
     try{if(vscode.env?.clipboard?.writeText)await vscode.env.clipboard.writeText(pair.code);}catch{/* Clipboard access is optional. */}
-    await vscode.window.showInformationMessage(`브라우저에서 BCSD 계정으로 로그인하고 연결을 승인하세요. 코드 ${pair.code}를 클립보드에도 복사했습니다.`);
+    void vscode.window.showInformationMessage(`브라우저에서 BCSD 계정으로 로그인하고 연결을 승인하세요. 코드 ${pair.code}를 클립보드에도 복사했습니다.`);
     const deadline=Date.now()+10*60*1000;
     let lastStatus='';
     while(Date.now()<deadline){
-      const statusResponse=await fetch(`${url}/auth/pair/status?pair_id=${encodeURIComponent(pair.pairId)}&secret=${encodeURIComponent(pair.pairSecret)}`,{redirect:'error',signal:AbortSignal.timeout(15000)});
+      if(pairAbort.signal.aborted)throw Error('Workspace 페어링을 취소했습니다.');
+      const statusResponse=await fetch(`${url}/auth/pair/status?pair_id=${encodeURIComponent(pair.pairId)}&secret=${encodeURIComponent(pair.pairSecret)}`,{redirect:'error',signal:AbortSignal.any([pairAbort.signal,AbortSignal.timeout(15000)])});
       if(!statusResponse.ok)throw Error(`페어링 상태 확인 실패 (HTTP ${statusResponse.status})`);const status=await statusResponse.json();
       if(status.status!==lastStatus){lastStatus=status.status;output.appendLine(`페어링 상태: ${status.status}`);}
       if(status.status==='approved'){if(!status.workerToken)throw Error('서버는 연결을 승인했지만 Bearer 토큰을 전달하지 않았습니다. Workspace 연결 해제 후 토큰 재발급으로 다시 시도하세요.');await context.secrets.store(workerKey,status.workerToken);if(status.mcpToken)await context.secrets.store(mcpKey,status.mcpToken);output.appendLine('개인 Workspace·MCP Bearer 토큰을 SecretStorage에 저장했습니다.');return {workerToken:status.workerToken,mcpToken:status.mcpToken||''};}
@@ -500,13 +505,21 @@ function activate(context){
       await new Promise(resolve=>setTimeout(resolve,1500));
     }
     throw Error('페어링 승인 시간이 만료되었습니다. 다시 연결하세요.');
+    })();
+    relayPairPromise=run;
+    try{return await run;}finally{if(relayPairPromise===run)relayPairPromise=null;relayPairAbort=null;relayPending=false;relayPairCode='';snapshot();}
   }
   async function copyMcpAuth(){
     const project=await projectContext.ensure(),raw=await chooseRelayUrl();if(!raw)return;const u=new URL(raw),{mcpKey}=relayPairKeys(u.origin,project),token=await context.secrets.get(mcpKey);if(!token)throw Error('먼저 BCSD 계정으로 Workspace를 연결하세요.');
     const value=JSON.stringify({type:'bearer',token});if(!vscode.env?.clipboard?.writeText)throw Error('VS Code 클립보드를 사용할 수 없습니다.');await vscode.env.clipboard.writeText(value);await vscode.window.showInformationMessage('학교 MCP 인증 JSON을 클립보드에 복사했습니다. 학교 리소스 → MCP에 붙여 넣으세요.');
   }
-  async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
+  async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;relayPairAbort?.abort();relayPairAbort=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayPending=false;relayPairCode='';relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
   async function connectRelay({forcePair=false,auto=false}={}){
+    if(relayPairPromise){
+      output.appendLine(`이미 페어링 승인 대기 중입니다${relayPairCode?` (코드 ${relayPairCode})`:''}. 기존 요청을 계속 확인합니다.`);
+      post({type:'notice',text:`이미 브라우저 승인 대기 중입니다${relayPairCode?` · 코드 ${relayPairCode}`:''}. 새 연결을 만들지 않고 기존 요청을 계속 확인합니다.`});
+      return relayPairPromise;
+    }
     if(relayController){
       if(auto||relayConnected)return vscode.window.showInformationMessage('이미 연결되어 있습니다.');
       output.appendLine('기존에 실패한 Workspace 연결을 정리하고 다시 시도합니다.');
@@ -521,7 +534,7 @@ function activate(context){
     else if(!forcePair&&token&&token.length>=32){pairMode=false;}
     else if(pairMode){const selected=await vscode.window.showQuickPick([{label:'BCSD 계정으로 브라우저 승인',description:'로그인 후 개인 토큰을 자동 발급합니다.',value:'pair'},{label:'수동 WORKER_TOKEN 입력',description:'기존 공용 토큰 호환 모드',value:'manual'}],{title:'Workspace MCP 인증 방식',placeHolder:'권장: BCSD 계정으로 브라우저 승인',ignoreFocusOut:true});if(!selected)return;pairMode=selected.value==='pair';}
     if(!auto&&!await approval(`${project.name}을 ${url}에 연결합니다. 학교 AI가 파일 도구를 요청할 수 있으며, 읽기/검색/수정은 건별로 승인합니다.`))return;
-    if(pairMode){relayError='브라우저 승인 대기 중';snapshot();const credentials=await pairRelay(url,project,{force:forcePair});token=credentials.workerToken;mcpToken=credentials.mcpToken;}else if(!token){token=await vscode.window.showInputBox({title:'중계 서버 WORKER_TOKEN',password:true,value:'',ignoreFocusOut:true});if(!token)return;if(token.length<32)throw Error('32자 이상 토큰이 필요합니다.');}
+    if(pairMode){const credentials=await pairRelay(url,project,{force:forcePair});token=credentials.workerToken;mcpToken=credentials.mcpToken;}else if(!token){token=await vscode.window.showInputBox({title:'중계 서버 WORKER_TOKEN',password:true,value:'',ignoreFocusOut:true});if(!token)return;if(token.length<32)throw Error('32자 이상 토큰이 필요합니다.');}
     if(projectContext.project!==project)throw Error('프로젝트가 변경되었습니다. MCP를 다시 연결하세요.');
     await context.secrets.store(key,token);relayRoot=project.path;const ctl=relayController=new AbortController();const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','X-Worker-Id':randomUUID()};relaySession={url,headers};
     const call=async(route,body,timeout=30000)=>{const r=await fetch(url+route,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.any([ctl.signal,AbortSignal.timeout(timeout)])});if(!r.ok)throw Error(`중계 HTTP ${r.status}`);return r.json();};
