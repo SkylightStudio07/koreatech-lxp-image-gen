@@ -507,7 +507,11 @@ function activate(context){
   }
   async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
   async function connectRelay({forcePair=false,auto=false}={}){
-    if(relayController)return vscode.window.showInformationMessage('이미 연결 중입니다. 먼저 외부 MCP 연결을 해제하세요.');
+    if(relayController){
+      if(auto||relayConnected)return vscode.window.showInformationMessage('이미 연결되어 있습니다.');
+      output.appendLine('기존에 실패한 Workspace 연결을 정리하고 다시 시도합니다.');
+      await disconnectRelay();
+    }
     if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역이 필요합니다.');
     const project=await projectContext.ensure();relayError='';snapshot();
     const raw=auto?configuredRelayUrl():await chooseRelayUrl();if(!raw)return;
