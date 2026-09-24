@@ -1,4 +1,4 @@
-# KOREATECH School Code — 0.8.1 preview
+# KOREATECH School Code — 0.8.2 preview
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
@@ -6,7 +6,7 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.8.1.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.8.2.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -80,11 +80,11 @@ Blender·Unreal MCP는 서버마다 인증·전송 방식이 다릅니다. 이 �
 
 `/health`에서 `true`가 나오는 것은 NAS 서버가 살아 있다는 뜻일 뿐, VS Code 워커가 인증되어 연결됐다는 뜻은 아닙니다. 확장에는 `WORKER_TOKEN`을, 학교 MCP 등록에는 별도의 `MCP_TOKEN`을 입력합니다. 두 토큰을 바꾸면 패널에 **연결 안 됨** 또는 **401** 오류가 표시됩니다. 역방향 프록시가 `/worker/heartbeat`, `/worker/poll`, `/worker/result`, `/worker/status`, `/worker/disconnect` 경로와 `Authorization` 헤더를 그대로 전달하는지도 확인하세요. 한 릴레이에는 한 VS Code 창만 연결됩니다.
 
-0.8.1부터 패널에 릴레이 오류가 함께 표시됩니다. `health는 true인데 연결 안 됨`이면 보통 기본 주소에 `/health`를 넣었거나, `WORKER_TOKEN`이 틀렸거나, 프록시가 `/worker/*`를 전달하지 않는 경우입니다. **MCP 해제** 후 기본 주소와 `WORKER_TOKEN`을 다시 입력해 보세요.
+0.8.2부터 중계 서버 선택 창에 `bcsd-nai`가 기본값으로 표시되고, 아래에 **사용자 지정 주소 입력** 항목이 표시됩니다. `health는 true인데 연결 안 됨`이면 보통 기본 주소에 `/health`를 넣었거나, `WORKER_TOKEN`이 틀렸거나, 프록시가 `/worker/*`를 전달하지 않는 경우입니다. **MCP 해제** 후 `bcsd-nai (기본 서버)` 또는 사용자 지정 주소와 `WORKER_TOKEN`을 다시 입력해 보세요.
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.8.1.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.8.2.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
 Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것은 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
 

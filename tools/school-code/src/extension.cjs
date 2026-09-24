@@ -15,6 +15,7 @@ const skills=require('./skills.cjs');
 const {runShell,TaskManager}=require('./harness.cjs');
 const {compactMessages,estimateMessages,threshold:compactThreshold}=require('./compaction.cjs');
 const {McpRegistry}=require('./mcp-registry.cjs');
+const DEFAULT_RELAY_URL='https://bcsd-nai.mywire.org:3010';
 
 function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
@@ -199,6 +200,20 @@ function activate(context){
     if(unityPathConfigured()&&!mcpRegistry.get('unity-cli')){mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});changed=true;}
     if(changed){await mcpRegistry.save();snapshot();}
   }
+  async function chooseRelayUrl(){
+    const config=vscode.workspace.getConfiguration('schoolCode');
+    const saved=context.globalState?.get?.('schoolCode.relayUrl')||config.get('relayUrl',DEFAULT_RELAY_URL)||DEFAULT_RELAY_URL;
+    if(typeof vscode.window.showQuickPick!=='function')return vscode.window.showInputBox({title:'MCP 중계 서버 주소',value:saved,prompt:'기본값은 bcsd-nai입니다. HTTPS 주소 또는 로컬 테스트용 http://127.0.0.1:18880'});
+    const options=[{label:'bcsd-nai (기본 서버)',description:DEFAULT_RELAY_URL,value:DEFAULT_RELAY_URL}];
+    if(saved&&saved!==DEFAULT_RELAY_URL)options.push({label:'현재 사용자 지정 서버',description:saved,value:saved});
+    options.push({label:'사용자 지정 주소 입력…',description:'다른 HTTPS 서버 또는 로컬 테스트 주소',value:''});
+    const selected=await vscode.window.showQuickPick(options,{title:'MCP 중계 서버 선택',placeHolder:'연결할 중계 서버를 선택하세요.',ignoreFocusOut:true});
+    if(!selected)return null;
+    if(selected.value)return selected.value;
+    const custom=await vscode.window.showInputBox({title:'사용자 지정 MCP 중계 서버 주소',value:saved===DEFAULT_RELAY_URL?'':saved,prompt:'예: https://example.com:3010 또는 http://127.0.0.1:18880',ignoreFocusOut:true});
+    if(!custom)return null;
+    try{const normalized=new URL(custom).origin;await context.globalState?.update?.('schoolCode.relayUrl',normalized);try{if(typeof config.update==='function')await config.update('relayUrl',normalized,vscode.ConfigurationTarget?.Global??true);}catch{/* Older installations may not have the setting registered. */}return normalized;}catch{throw Error('사용자 지정 중계 주소가 올바르지 않습니다.');}
+  }
   async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50');agents=[...new Map([...(own.items||[]),...(pub.items||[])].map(a=>[a.id,{id:a.id,name:a.name}])).values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
   async function send(data){if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
     const message=String(data.message||'');if(!message.trim())throw Error('질문을 입력하세요.');
@@ -339,7 +354,7 @@ function activate(context){
     if(relayController)return vscode.window.showInformationMessage('이미 연결 중입니다. 먼저 외부 MCP 연결을 해제하세요.');
     if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역이 필요합니다.');
     const project=await projectContext.ensure();relayError='';snapshot();
-    const raw=await vscode.window.showInputBox({title:'MCP 중계 서버 주소',value:vscode.workspace.getConfiguration('schoolCode').get('relayUrl',''),prompt:'HTTPS 주소 또는 로컬 테스트용 http://127.0.0.1:18880'});if(!raw)return;
+    const raw=await chooseRelayUrl();if(!raw)return;
     const u=new URL(raw);if(u.username||u.password||u.search||u.hash||u.pathname!=='/'||!(u.protocol==='https:'||u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error('HTTPS 서버 기본 주소를 입력하세요.');const url=u.origin;
     const key='relay:'+url;let token=await context.secrets.get(key);
     token=await vscode.window.showInputBox({title:'중계 서버 WORKER_TOKEN',password:true,value:token||'',ignoreFocusOut:true});if(!token)return;if(token.length<32)throw Error('32자 이상 토큰이 필요합니다.');
