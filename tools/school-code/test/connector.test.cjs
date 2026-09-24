@@ -38,3 +38,22 @@ test('Chrome worker converts an image upload response to bounded Base64 metadata
  const running=vm.runInNewContext(`(${browserWorker.toString()})(18766)`,context);await ready;await running;
  assert.equal(calls.find(c=>c.url==='/api/AiCA/api/v1/chat/uploads/generated-1').opts.headers['X-CSRF-Token'],'school-only');
 });
+test('Chrome worker sends pasted files as multipart uploads with school auth',async()=>{
+ const calls=[];let finish;const ready=new Promise(r=>finish=r),window={};
+ class FakeBlob{constructor(parts,options){this.parts=parts;this.type=options?.type||'';}}
+ class FakeFormData{constructor(){this.fields=[];}append(name,value,filename){this.fields.push({name,value,filename});}}
+ const fakeFetch=async(url,opts={})=>{
+  calls.push({url,opts});
+  if(url.endsWith('/connector/connect'))return {ok:true,json:async()=>({product:'school-code',workerToken:'worker'})};
+  if(url.endsWith('/worker/poll'))return {ok:true,json:async()=>({id:'upload-job',route:'/chat/upload',method:'POST',upload:true,body:{filename:'reference.png',mime:'image/png',base64:'iVBORw=='}})};
+  if(url==='/api/AiCA/api/v1/chat/upload'){
+    assert.equal(opts.headers['X-CSRF-Token'],'school-only');assert.equal(opts.headers['Content-Type'],undefined);assert(opts.body instanceof FakeFormData);assert.equal(opts.body.fields[0].name,'file');assert.equal(opts.body.fields[0].filename,'reference.png');assert.equal(opts.body.fields[0].value.type,'image/png');
+    return {ok:true,text:async()=>'{"file_id":"upload-1","filename":"reference.png","file_type":"image","file_size":4}'};
+  }
+  if(url.endsWith('/worker/event')){const data=JSON.parse(opts.body);if(data.done){assert.equal(data.result.file_id,'upload-1');window.__schoolCodeWorker.stop();finish();}return {ok:true,json:async()=>({})};}
+  return {ok:true,json:async()=>({})};
+ };
+ const context={window,location:{origin:'https://ai.koreatech.ac.kr'},document:{cookie:'csrf_token=school-only'},fetch:fakeFetch,AbortController,AbortSignal,TextDecoder,FormData:FakeFormData,Blob:FakeBlob,atob:value=>Buffer.from(value,'base64').toString('binary'),alert:()=>{},setTimeout:(f)=>setTimeout(f,1),setInterval:f=>setInterval(f,10000),clearInterval};
+ const running=vm.runInNewContext(`(${browserWorker.toString()})(18766)`,context);await ready;await running;
+ assert.equal(calls.find(c=>c.url==='/api/AiCA/api/v1/chat/upload').opts.method,'POST');
+});

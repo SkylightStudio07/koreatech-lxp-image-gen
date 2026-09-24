@@ -25,6 +25,8 @@ function activate(context){
   const bridge=new BrowserBridge(port);let bridgeError='';const ready=bridge.start().catch(e=>{bridgeError=e.code==='EADDRINUSE'?'브리지 포트가 사용 중입니다. 다른 VS Code 창을 닫거나 bridgePort를 변경하세요.':e.message;output.appendLine(bridgeError);});context.subscriptions.push({dispose:()=>bridge.dispose()});
   let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',unityEditorConnected=false,projectBusy=false;
   const imagePreviews=new Map(),imageLoads=new Map();
+  const uploadCache=new Map(),uploadControllers=new Map();
+  const MAX_UPLOADS=5,MAX_UPLOAD_BYTES=32*1024*1024,MAX_UPLOAD_BASE64=45*1024*1024;
   const projectContext=new ProjectContext(vscode,context.workspaceState);
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
   const mcpRegistry=new McpRegistry(context.workspaceState);
@@ -67,6 +69,45 @@ function activate(context){
       if(Number.isFinite(a.file_size)&&a.file_size>=0)item.file_size=a.file_size;
       return item;
     }).filter(Boolean);
+  }
+  function uploadSize(base64){
+    const padding=base64.endsWith('==')?2:base64.endsWith('=')?1:0;
+    return Math.floor(base64.length*3/4)-padding;
+  }
+  function safeUploadName(value){
+    const name=String(value||'upload.bin').replace(/[\\/\u0000-\u001f]/g,'_').trim().slice(0,240);
+    return name||'upload.bin';
+  }
+  function uploadType(filename,mime){
+    const normalized=String(mime||'').toLowerCase();
+    if(normalized.startsWith('image/'))return 'image';
+    const ext=String(filename).toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+    if(['png','jpg','jpeg','webp','gif','svg','avif','bmp','ico','tif','tiff'].includes(ext))return 'image';
+    return normalized.slice(0,80)||'file';
+  }
+  async function uploadReference(data){
+    const clientId=String(data.clientId||'');if(!/^[a-zA-Z0-9_-]{1,120}$/.test(clientId))throw Error('첨부 파일 식별자가 올바르지 않습니다.');
+    if(uploadControllers.has(clientId))return;
+    const base64=String(data.base64||'');if(!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)||base64.length>MAX_UPLOAD_BASE64)throw Error('첨부 파일 데이터가 올바르지 않습니다.');
+    const size=uploadSize(base64);if(size<=0||size>MAX_UPLOAD_BYTES)throw Error('첨부 파일은 32 MiB 이하만 지원합니다.');
+    if(uploadCache.size>=20)uploadCache.delete(uploadCache.keys().next().value);
+    const filename=safeUploadName(data.filename),mime=String(data.mime||'application/octet-stream').slice(0,120)||'application/octet-stream';
+    const controller=new AbortController();uploadControllers.set(clientId,controller);post({type:'uploadStarted',clientId});
+    try{
+      if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
+      const result=await bridge.request('/chat/upload',{method:'POST',body:{filename,mime,base64},upload:true,signal:controller.signal});
+      const raw=result?.file||result?.data||result;
+      const fileId=String(raw?.file_id||'');if(!/^[a-zA-Z0-9-]{1,200}$/.test(fileId))throw Error('학교 업로드 응답에 파일 ID가 없습니다.');
+      const returnedSize=Number(raw?.file_size);if(Number.isFinite(returnedSize)&&(returnedSize<0||returnedSize>MAX_UPLOAD_BYTES))throw Error('학교 업로드 파일 크기가 제한을 초과했습니다.');
+      const attachment={file_id:fileId,filename:safeUploadName(raw?.filename||filename),file_type:String(raw?.file_type||uploadType(filename,mime)).slice(0,80),file_size:Number.isFinite(returnedSize)&&returnedSize>0?Math.floor(returnedSize):size};
+      uploadCache.set(fileId,attachment);while(uploadCache.size>20)uploadCache.delete(uploadCache.keys().next().value);
+      post({type:'uploadAdded',clientId,attachment});
+    }catch(e){post({type:'uploadFailed',clientId,error:String(e.message||'파일 업로드에 실패했습니다.').slice(0,240)});throw e;}
+    finally{uploadControllers.delete(clientId);}
+  }
+  function removeUpload(data){
+    const clientId=String(data.clientId||'');if(uploadControllers.has(clientId))uploadControllers.get(clientId).abort();
+    const fileId=String(data.file_id||'');if(fileId)uploadCache.delete(fileId);post({type:'uploadRemoved',clientId,file_id:fileId});
   }
   function isImageAttachment(a){
     const type=String(a.file_type||'').toLowerCase(),name=String(a.filename||'').toLowerCase();
@@ -274,13 +315,15 @@ function activate(context){
   }
   async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50');agents=[...new Map([...(own.items||[]),...(pub.items||[])].map(a=>[a.id,{id:a.id,name:a.name}])).values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
   async function send(data){if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
-    const message=String(data.message||'');if(!message.trim())throw Error('질문을 입력하세요.');
+    const requested=cleanAttachments(data.uploads).slice(0,MAX_UPLOADS),uploaded=[];const seen=new Set();
+    for(const item of requested){if(seen.has(item.file_id))throw Error('같은 첨부 파일을 두 번 보낼 수 없습니다.');seen.add(item.file_id);const cached=uploadCache.get(item.file_id);if(!cached)throw Error('첨부 파일 업로드가 끝나지 않았거나 만료되었습니다. 다시 첨부하세요.');uploaded.push(cached);}
+    let message=String(data.message||'');if(!message.trim()&&uploaded.length)message='첨부한 파일을 확인하고 필요한 내용을 설명해 주세요.';if(!message.trim())throw Error('질문을 입력하거나 파일을 첨부하세요.');
     let compacted=null;
     if(state.contextCompaction&&!state.contextSummary){const limit=compactThreshold(state.compactionThreshold);if(estimateMessages([...state.messages,{role:'user',text:message}])>limit)compacted=compactMessages(state.messages,Math.max(16000,limit-message.length));if(compacted){state.messages=compacted.messages;state.contextSummary=compacted.summary;state.conversationId=null;post({type:'notice',text:`컨텍스트를 압축했습니다. 이전 메시지 ${compacted.removed}개를 요약하고 새 대화 맥락으로 이어갑니다.`});await save();snapshot();}}
-    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+message);const body=chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId},models);
+    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+message);const body=chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId,fileIds:uploaded.map(a=>a.file_id),fileAttachments:uploaded},models);
     const info=projectContext.info();
-    state.model=data.model;state.agent=data.agent||'';state.mode=data.mode;if(state.title==='새 대화')state.title=message.replace(/\s+/g,' ').trim().slice(0,48)||'새 대화';state.messages.push({role:'user',text:message,project:info.files.length?info.project?.name:undefined,contextFiles:info.files});projectContext.clear();const answer={role:'assistant',text:'',status:'응답 중'};state.messages.push(answer);
-    controller=new AbortController();post({type:'accepted'});snapshot();let done=false;
+    state.model=data.model;state.agent=data.agent||'';state.mode=data.mode;if(state.title==='새 대화')state.title=message.replace(/\s+/g,' ').trim().slice(0,48)||'새 대화';state.messages.push({role:'user',text:message,attachments:uploaded,project:info.files.length?info.project?.name:undefined,contextFiles:info.files});projectContext.clear();const answer={role:'assistant',text:'',status:'응답 중'};state.messages.push(answer);
+    controller=new AbortController();post({type:'accepted'});snapshot();void preloadAttachments(uploaded);let done=false;
     const parser=new SSEParser(event=>{
       if(event.conversation_id)state.conversationId=event.conversation_id;
       if(event.type==='delta'||event.type==='token'){answer.text+=event.content??event.delta??'';post({type:'stream',text:answer.text,status:answer.status});}
@@ -432,6 +475,8 @@ function activate(context){
   }
   async function handle(m){try{
     if(m.type==='ready'){snapshot();postImagePreviews();void hydrateAttachments(state);return;}
+    if(m.type==='uploadAdd')return await uploadReference(m);
+    if(m.type==='uploadRemove'){removeUpload(m);return;}
     if(['projectChoose','attachFiles','attachFolder','attachmentPreview','attachmentRemove','attachmentsClear'].includes(m.type))return await projectAction(m.type,m.path);
     if(m.type==='connect')return await connectBrowser();
     if(m.type==='connectorFolder')return await vscode.commands.executeCommand('revealFileInOS',vscode.Uri.joinPath(context.extensionUri,'chrome-extension','manifest.json'));
@@ -460,7 +505,7 @@ function activate(context){
   }catch(e){post({type:'notice',text:e.message});vscode.window.showErrorMessage('School Code: '+e.message);}}
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
   for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
-  const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();void disconnectRelay();void taskManager.dispose();}});
+  const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();for(const c of uploadControllers.values())c.abort();uploadControllers.clear();void disconnectRelay();void taskManager.dispose();}});
   void hydrateMcpRegistry();
 }
 module.exports={activate};

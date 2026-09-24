@@ -6,10 +6,85 @@ let models = [];
 let agents = [];
 let sessions = [];
 let attachmentPreviews = new Map();
+let draftUploads = [];
+const MAX_UPLOADS = 5;
+const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL = 64 * 1024 * 1024;
 
 for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'new', 'sessionNew', 'sessionRename', 'selection', 'relay', 'disconnectRelay', 'stop']) {
   $(type).addEventListener('click', () => vscode.postMessage({ type: type === 'new' ? 'sessionNew' : type }));
 }
+
+function makeClientId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function formatBytes(size) {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+function localNotice(text) { $('notice').hidden = false; $('notice').textContent = text; }
+
+async function fileBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let raw = '';
+  for (let i = 0; i < bytes.length; i += 8192) raw += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return btoa(raw);
+}
+
+function renderDraftUploads() {
+  const list = $('draftUploads');
+  if (!list) return;
+  list.replaceChildren();
+  list.hidden = !draftUploads.length;
+  for (const item of draftUploads) {
+    const row = document.createElement('div'); row.className = `draft-upload ${item.status || ''}`;
+    if (item.file?.type?.startsWith('image/')) {
+      const thumb = document.createElement('img'); thumb.className = 'draft-upload-thumb'; thumb.alt = ''; thumb.src = item.previewUrl || (item.previewUrl = URL.createObjectURL(item.file)); row.append(thumb);
+    }
+    const info = document.createElement('span'); info.className = 'draft-upload-info';
+    const name = document.createElement('strong'); name.textContent = item.filename; name.title = item.filename;
+    const status = document.createElement('small'); status.textContent = item.status === 'uploading' ? '업로드 중…' : item.status === 'failed' ? item.error : `첨부됨 · ${formatBytes(item.size)}`;
+    info.append(name, status);
+    const remove = document.createElement('button'); remove.className = 'draft-upload-remove'; remove.textContent = '×'; remove.title = '첨부 빼기'; remove.disabled = busy && item.status !== 'uploading';
+    remove.addEventListener('click', () => { vscode.postMessage({ type: 'uploadRemove', clientId: item.clientId, file_id: item.file_id }); draftUploads = draftUploads.filter(x => x.clientId !== item.clientId); if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); renderDraftUploads(); });
+    row.append(info, remove); list.append(row);
+  }
+}
+
+async function addUploadFiles(files) {
+  const incoming = [...files].filter(Boolean);
+  if (!incoming.length || busy) return;
+  if (draftUploads.length + incoming.length > MAX_UPLOADS) { localNotice(`채팅 첨부는 최대 ${MAX_UPLOADS}개까지 가능합니다.`); return; }
+  const currentTotal = draftUploads.reduce((total, item) => total + item.size, 0);
+  let added = 0;
+  for (const file of incoming) {
+    if (file.size <= 0 || file.size > MAX_UPLOAD_BYTES) { localNotice(`${file.name || '파일'}: 32 MiB 이하 파일만 첨부할 수 있습니다.`); continue; }
+    if (currentTotal + added + file.size > MAX_UPLOAD_TOTAL) { localNotice('한 번에 첨부하는 파일은 합계 64 MiB 이하만 가능합니다.'); break; }
+    const item = { clientId: makeClientId(), file, filename: file.name || 'pasted-file', mime: file.type || 'application/octet-stream', size: file.size, status: 'uploading' };
+    draftUploads.push(item); added += file.size;
+    try { item.base64 = await fileBase64(file); vscode.postMessage({ type: 'uploadAdd', clientId: item.clientId, filename: item.filename, mime: item.mime, base64: item.base64 }); }
+    catch (e) { item.status = 'failed'; item.error = '파일을 읽지 못했습니다.'; }
+  }
+  renderDraftUploads();
+}
+
+const uploadDropzone = $('uploadDropzone'), uploadPicker = $('uploadPicker'), composer = document.querySelector('.composer');
+uploadDropzone.addEventListener('click', () => uploadPicker.click());
+uploadDropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); uploadPicker.click(); } });
+uploadPicker.addEventListener('change', e => { void addUploadFiles(e.target.files); e.target.value = ''; });
+for (const target of [uploadDropzone, composer]) {
+  target.addEventListener('dragover', e => { e.preventDefault(); uploadDropzone.classList.add('drag-over'); });
+  target.addEventListener('dragleave', e => { if (!target.contains(e.relatedTarget)) uploadDropzone.classList.remove('drag-over'); });
+  target.addEventListener('drop', e => { e.preventDefault(); uploadDropzone.classList.remove('drag-over'); void addUploadFiles(e.dataTransfer.files); });
+}
+$("prompt").addEventListener('paste', e => {
+  const direct = [...(e.clipboardData?.files || [])];
+  const fromItems = [...(e.clipboardData?.items || [])].map(item => item.kind === 'file' ? item.getAsFile() : null).filter(Boolean);
+  const files = [...new Map([...direct, ...fromItems].map(file => [`${file.name}:${file.size}:${file.lastModified}`, file])).values()].filter(file => file.type || file.size);
+  if (files.length) { e.preventDefault(); void addUploadFiles(files); }
+});
 
 function mcpStatus(status) {
   return ({ connected: '연결됨', configured: '설정됨', error: '오류', 'not-connected': '연결 안 됨', 'not-configured': '미설정', disabled: '꺼짐' })[status] || status || '미설정';
@@ -99,8 +174,11 @@ function choices() {
 
 function send() {
   const message = $('prompt').value.trim(), value = $('model').value || $('agent').value;
-  if (!message || busy || !value) return;
-  vscode.postMessage({ type: 'send', message, ...choices() });
+  const uploads = draftUploads.filter(item => item.status === 'ready' && item.file_id).map(item => ({ file_id: item.file_id, filename: item.filename, file_type: item.file_type, file_size: item.file_size || item.size }));
+  if (draftUploads.some(item => item.status === 'uploading')) { localNotice('파일 업로드가 끝날 때까지 잠시 기다려 주세요.'); return; }
+  if (draftUploads.some(item => item.status === 'failed')) { localNotice('업로드에 실패한 첨부 파일을 빼거나 다시 추가해 주세요.'); return; }
+  if ((!message && !uploads.length) || busy || !value) return;
+  vscode.postMessage({ type: 'send', message, uploads, ...choices() });
 }
 
 $('send').addEventListener('click', send);
@@ -158,7 +236,7 @@ function renderAttachments(container, attachments) {
   section.className = 'message-attachments';
   const heading = document.createElement('small');
   heading.className = 'attachment-heading';
-  heading.textContent = `생성 결과 ${attachments.length}개`;
+  heading.textContent = `첨부 파일 ${attachments.length}개`;
   section.append(heading);
   for (const a of attachments) {
     const preview = attachmentPreviews.get(a.file_id), figure = document.createElement('figure');
@@ -176,7 +254,7 @@ function renderAttachments(container, attachments) {
     } else {
       const pending = document.createElement('div');
       pending.className = 'attachment-pending';
-      pending.textContent = `${a.filename || '이미지'} · 미리보기 불러오는 중`;
+      pending.textContent = `${a.filename || '파일'} · ${String(a.file_type || '').toLowerCase() === 'image' ? '미리보기 불러오는 중' : '첨부됨'}`;
       figure.append(pending);
     }
     section.append(figure);
@@ -212,13 +290,17 @@ window.addEventListener('message', ({ data: m }) => {
     const agentPlaceholder = document.createElement('option'); agentPlaceholder.value = ''; agentPlaceholder.textContent = '에이전트를 선택하세요'; $('agent').append(agentPlaceholder);
     for (const x of agents) { const option = document.createElement('option'); option.value = x.id; option.textContent = x.name || x.id; $('agent').append(option); }
     $('model').value = m.state.model || ''; $('agent').value = m.state.agent || '';
-    $('mode').value = m.state.mode; $('approvalMode').value = m.state.approvalMode || 'ask'; $('contextCompaction').checked = m.state.contextCompaction === true; $('compactionThreshold').value = String(m.state.compactionThreshold || 60000); $('compactionThreshold').disabled = !$('contextCompaction').checked || busy; $('mode').disabled = !!m.state.agent || busy; $('approvalMode').disabled = busy; $('contextCompaction').disabled = busy; $('model').disabled = busy; $('agent').disabled = busy; $('send').disabled = busy; $('new').disabled = busy; $('sessionNew').disabled = busy; $('sessionRename').disabled = busy; $('stop').hidden = !busy; renderProject(m); render();
+    $('mode').value = m.state.mode; $('approvalMode').value = m.state.approvalMode || 'ask'; $('contextCompaction').checked = m.state.contextCompaction === true; $('compactionThreshold').value = String(m.state.compactionThreshold || 60000); $('compactionThreshold').disabled = !$('contextCompaction').checked || busy; $('mode').disabled = !!m.state.agent || busy; $('approvalMode').disabled = busy; $('contextCompaction').disabled = busy; $('model').disabled = busy; $('agent').disabled = busy; $('send').disabled = busy; $('new').disabled = busy; $('sessionNew').disabled = busy; $('sessionRename').disabled = busy; $('stop').hidden = !busy; uploadDropzone.classList.toggle('disabled', busy); uploadDropzone.setAttribute('aria-disabled', busy ? 'true' : 'false'); renderDraftUploads(); renderProject(m); render();
   }
   if (m.type === 'stream') { const last = messages.at(-1); if (last?.role === 'assistant') { last.text = m.text; last.status = m.status; render(); } }
   if (m.type === 'attachmentPreviews') { attachmentPreviews = new Map((m.previews || []).map(p => [p.file_id, p])); render(); }
   if (m.type === 'connection') connection(m);
   if (m.type === 'selection') { $('prompt').value += m.text; $('prompt').focus(); }
-  if (m.type === 'accepted') $('prompt').value = '';
+  if (m.type === 'accepted') { $('prompt').value = ''; for (const item of draftUploads) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); draftUploads = []; renderDraftUploads(); }
+  if (m.type === 'uploadStarted') { const item = draftUploads.find(x => x.clientId === m.clientId); if (item) { item.status = 'uploading'; renderDraftUploads(); } }
+  if (m.type === 'uploadAdded') { const item = draftUploads.find(x => x.clientId === m.clientId); if (item) { Object.assign(item, m.attachment, { status: 'ready' }); renderDraftUploads(); } }
+  if (m.type === 'uploadFailed') { const item = draftUploads.find(x => x.clientId === m.clientId); if (item) { item.status = 'failed'; item.error = m.error || '업로드 실패'; renderDraftUploads(); } }
+  if (m.type === 'uploadRemoved') { const item = draftUploads.find(x => x.clientId === m.clientId); if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl); draftUploads = draftUploads.filter(x => x.clientId !== m.clientId); renderDraftUploads(); }
   if (m.type === 'notice') { $('notice').hidden = false; $('notice').textContent = m.text; }
 });
 
