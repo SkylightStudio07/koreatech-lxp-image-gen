@@ -28,7 +28,7 @@ function activate(context){
   const projectContext=new ProjectContext(vscode,context.workspaceState);
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
   const mcpRegistry=new McpRegistry(context.workspaceState);
-  const notion=new NotionClient({getToken:()=>context.secrets.get('schoolCode.notion.integrationToken')});
+  const notion=new NotionClient({getToken:()=>context.secrets.get('schoolCode.notion.integrationToken'),getPublicLinks:()=>context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[]});
   const unityEditor=new UnityEditorClient({getToken:()=>context.secrets.get('schoolCode.unity.editorToken'),getPort:()=>vscode.workspace.getConfiguration('schoolCode').get('unityEditorPort',18777)});
   const taskManager=new TaskManager();
   const post=m=>view?.webview.postMessage(m);
@@ -107,14 +107,23 @@ function activate(context){
   async function connectBrowser(){await ready;if(bridgeError)throw Error(bridgeError);await vscode.env.openExternal(vscode.Uri.parse('https://ai.koreatech.ac.kr/AiCA/chat'));vscode.window.showInformationMessage('School Code Connector가 설치되어 있으면 자동 연결됩니다. 최초 설치: 확장 폴더 열기 → Chrome 확장 프로그램에서 압축해제된 확장 로드.');}
   async function configureNotion(){
     const existing=await context.secrets.get('schoolCode.notion.integrationToken');
-    const token=await vscode.window.showInputBox({title:'Notion 읽기 전용 연결 토큰',prompt:'Notion 설정에서 만든 Internal Integration Secret을 입력하세요. 토큰은 VS Code SecretStorage에만 저장됩니다.',password:true,ignoreFocusOut:true,value:existing||''});
-    if(!token)return;
-    if(token.trim().length<20)throw Error('Notion 토큰이 너무 짧습니다.');
-    const previous=existing;await context.secrets.store('schoolCode.notion.integrationToken',token.trim());
-    try{await notion.request('/users/me');mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});await mcpRegistry.save();vscode.window.showInformationMessage('Notion 읽기 전용 연결이 설정되었습니다.');snapshot();}
+    const existingLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
+    const current=existing||existingLinks[0]||'';
+    const value=await vscode.window.showInputBox({title:'Notion 읽기 전용 연결',prompt:'Notion Integration Secret 또는 공개 페이지 링크를 입력하세요. 공개 링크는 쉼표로 여러 개 등록할 수 있습니다.',password:true,ignoreFocusOut:true,value:current});
+    if(!value)return;
+    const input=value.trim();
+    if(/^https?:\/\//i.test(input)){
+      const links=input.split(/[\s,;]+/).filter(Boolean);if(!links.length)throw Error('공개 Notion 링크가 필요합니다.');
+      const normalized=[];for(const link of links)normalized.push(await notion.validatePublicLink(link));
+      await context.globalState?.update?.('schoolCode.notion.publicLinks',[...new Set(normalized)]);
+      mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:'등록한 공개 Notion 페이지를 검색·읽기 전용으로 가져옵니다.',kind:'integration',enabled:true,capabilities:['search','read']});await mcpRegistry.save();vscode.window.showInformationMessage(`Notion 공개 링크 ${normalized.length}개가 연결되었습니다.`);snapshot();return;
+    }
+    if(input.length<20)throw Error('Notion 토큰이 너무 짧습니다.');
+    const previous=existing;await context.secrets.store('schoolCode.notion.integrationToken',input);
+    try{await notion.request('/users/me');mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});await mcpRegistry.save();vscode.window.showInformationMessage('Notion Integration 연결이 설정되었습니다.');snapshot();}
     catch(e){if(previous)await context.secrets.store('schoolCode.notion.integrationToken',previous);else await context.secrets.delete('schoolCode.notion.integrationToken');throw e;}
   }
-  async function disconnectNotion(){await context.secrets.delete('schoolCode.notion.integrationToken');mcpRegistry.remove('notion');await mcpRegistry.save();vscode.window.showInformationMessage('Notion 연결 토큰을 삭제했습니다.');snapshot();}
+  async function disconnectNotion(){await context.secrets.delete('schoolCode.notion.integrationToken');await context.globalState?.update?.('schoolCode.notion.publicLinks',[]);mcpRegistry.remove('notion');await mcpRegistry.save();vscode.window.showInformationMessage('Notion 연결 정보와 공개 링크를 삭제했습니다.');snapshot();}
   async function configureUnity(){
     const current=unityExecutable();
     const executable=await vscode.window.showInputBox({title:'Unity 실행 파일 경로',prompt:'Unity.exe 경로 또는 PATH에 등록된 Unity.exe를 입력하세요. 셸 도구는 별도 승인 후 프로젝트 안에서만 실행됩니다.',value:current||'Unity.exe',ignoreFocusOut:true});
@@ -243,7 +252,8 @@ function activate(context){
   }
   async function hydrateMcpRegistry(){
     let changed=false;
-    if(await context.secrets.get('schoolCode.notion.integrationToken')&&!mcpRegistry.get('notion')){mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});changed=true;}
+    const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
+    if((await context.secrets.get('schoolCode.notion.integrationToken')||notionLinks.length)&&!mcpRegistry.get('notion')){mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:notionLinks.length?'등록한 공개 Notion 페이지를 검색·읽기 전용으로 가져옵니다.':'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});changed=true;}
     if(await context.secrets.get('schoolCode.unity.editorToken')&&!mcpRegistry.get('unity-editor')){mcpRegistry.upsert({id:'unity-editor',catalogId:'unity-editor',name:'Unity Editor MCP',description:'실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',kind:'local-mcp',enabled:true,capabilities:['unity','scene']});changed=true;}
     if(unityPathConfigured()&&!mcpRegistry.get('unity-cli')){mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});changed=true;}
     if(changed){await mcpRegistry.save();snapshot();}
@@ -310,7 +320,8 @@ function activate(context){
     const notionTool=job.name.startsWith('notion_');
     if(job.name==='workspace_info'){
       const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
-       return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+       const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
+       return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');

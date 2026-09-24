@@ -16,7 +16,7 @@ const MCP_CATALOG = Object.freeze([
   {
     id: 'notion',
     name: 'Notion',
-    description: '공유한 Notion 페이지를 읽기 전용으로 검색합니다.',
+    description: 'Integration Secret 또는 공개 링크로 Notion 페이지를 읽기 전용으로 검색합니다.',
     kind: 'integration',
     builtIn: true,
     configurable: true,

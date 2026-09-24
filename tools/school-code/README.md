@@ -6,7 +6,7 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.9.0.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.9.1.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -60,7 +60,7 @@ Blender·Unreal처럼 별도 서버를 쓰는 항목은 주소와 Bearer 토큰�
 | MCP | 패널에서 할 일 | 연결이 완료된 상태 |
 |---|---|---|
 | 학교 Workspace | **학교 Workspace → 연결** → 중계 서버 기본 주소와 `WORKER_TOKEN` 입력 | `연결됨`과 `도구별 승인` 표시 |
-| Notion | Notion Integration에 페이지를 공유한 뒤 **Notion → 연결** → Integration Secret 입력 | `설정됨` 표시. 학교 Workspace와 에이전트도 필요 |
+| Notion | Integration Secret을 입력하거나 공개 Notion 페이지 링크를 **Notion → 연결**에 붙여넣기 | `설정됨` 표시. 학교 Workspace와 에이전트도 필요 |
 | Unity CLI | Unity 프로젝트를 선택하고 **Unity CLI → 연결** → `Unity.exe` 경로 입력 | `설정됨` 표시. Editor 브리지는 필요 없음 |
 | Unity Editor MCP | **Unity Editor MCP → 자동 준비** → Unity Editor 로그인/프로젝트 로딩 | `연결됨` 표시. 브리지 파일·토큰·Editor 실행을 자동 처리 |
 | Blender MCP | 실행 중인 HTTPS MCP의 주소(대개 `/mcp`)와 Bearer 토큰 입력 | `설정됨` 표시. 학교 리소스·에이전트 등록도 필요 |
@@ -84,7 +84,7 @@ Blender·Unreal MCP는 서버마다 인증·전송 방식이 다릅니다. 이 �
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.9.0.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.9.1.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
 Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 카탈로그의 버튼 이름도 `경로 설정`으로 표시됩니다. 이 단계는 `Unity.exe` 위치를 저장하는 것이며, 계속 실행 중인 MCP 서버를 만드는 과정이 아닙니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것도 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
 
@@ -177,7 +177,9 @@ SSE 전송 방식이 아니라 **HTTP**를 선택하세요. 이 서버는 statel
 
 Notion에서 Internal Integration을 만든 뒤 읽을 페이지와 데이터베이스를 해당 integration에 **공유**합니다. 패널의 **연결 및 외부 MCP → Notion 연결 설정**을 누르고 integration secret을 입력하세요. 토큰은 VS Code SecretStorage에만 저장되며 NAS 중계 서버로 복사하지 않습니다. 해제는 **Notion 연결 해제**입니다. 명령 팔레트의 같은 이름 명령도 사용할 수 있습니다.
 
-사용 순서는 `연결된 프로젝트` 선택 → **외부 MCP 연결** → Notion을 등록한 학교 **에이전트** 선택입니다. 이후 “Notion에서 `키워드`가 들어간 페이지를 찾아 요약해줘”처럼 질문하면 에이전트가 `notion_search`와 `notion_fetch_page`를 사용합니다. 페이지를 integration에 공유하지 않았거나 에이전트를 선택하지 않으면 Notion 도구가 호출되지 않습니다. 조회 요청은 도구 승인 설정에 따라 확인 창이 뜹니다.
+공개된 Notion 페이지만 읽을 때는 Integration을 만들 필요가 없습니다. Notion에서 **공유 → 웹에 게시**를 켠 뒤 생성된 `https://...notion.site/...` 또는 `https://www.notion.so/...` 링크를 같은 입력창에 붙여넣으세요. 링크가 실제로 공개되어 있는지 확인한 뒤 VS Code의 전역 상태에 주소만 저장합니다. 공개 페이지의 하위 페이지도 함께 검색하며, `notion_fetch_page`에는 검색 결과의 URL을 그대로 넘길 수 있습니다. 대화에 공개 링크를 직접 붙여 넣어도 페이지 읽기가 가능하고, 반복 검색하려는 링크만 패널에 등록하면 됩니다. 여러 공개 루트는 쉼표로 구분해 한 번에 등록합니다.
+
+사용 순서는 `연결된 프로젝트` 선택 → **외부 MCP 연결** → Notion을 등록한 학교 **에이전트** 선택입니다. 이후 “Notion에서 `키워드`가 들어간 페이지를 찾아 요약해줘” 또는 “이 Notion 링크를 읽고 핵심만 정리해줘”처럼 질문하면 에이전트가 `notion_search`, `notion_fetch_page`, `notion_list_children`를 사용합니다. 공개 링크 방식은 해당 링크와 그 아래 공개된 페이지 범위만 검색합니다. Integration 방식은 Integration에 공유한 범위가 검색 대상입니다. 조회 요청은 도구 승인 설정에 따라 확인 창이 뜹니다.
 
 학교 에이전트에는 다음 읽기 전용 도구가 보입니다.
 
@@ -185,7 +187,7 @@ Notion에서 Internal Integration을 만든 뒤 읽을 페이지와 데이터베
 - `notion_fetch_page`: 페이지 제목·URL·수정 시각 조회
 - `notion_list_children`: 페이지/블록의 텍스트와 하위 블록 목록 조회
 
-Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 모드에 따라 승인되며, 페이지가 integration에 공유되지 않았거나 토큰이 없으면 명확한 오류를 반환합니다.
+Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 모드에 따라 승인되며, 페이지가 Integration에 공유되지 않았고 공개 링크도 등록하지 않았다면 명확한 오류를 반환합니다. 공개 링크 읽기는 Notion의 공개 읽기 엔드포인트를 사용하므로 로그인 정보나 Integration Secret을 전송하지 않습니다.
 
 ### Unity CLI
 

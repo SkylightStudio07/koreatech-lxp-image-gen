@@ -1,6 +1,6 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {NotionClient,notionId,blockText}=require('../src/notion.cjs');
+const {NotionClient,notionId,blockText,parsePublicNotionUrl}=require('../src/notion.cjs');
 
 function response(status,data){return {ok:status>=200&&status<300,status,headers:{get:()=>String(JSON.stringify(data).length)},text:async()=>JSON.stringify(data)};}
 
@@ -26,4 +26,26 @@ test('Notion client rejects missing token, malformed IDs and API errors',async()
   const failed=new NotionClient({getToken:async()=>'secret_test_token_1234567890',fetchImpl:async()=>response(401,{message:'unauthorized'})});
   await assert.rejects(failed.fetchPage('01234567-89ab-cdef-0123-456789abcdef'),/Notion 요청 실패: unauthorized/);
   assert.equal(blockText({type:'paragraph',paragraph:{rich_text:[{plain_text:'안녕'}]}}),'안녕');
+});
+
+test('public Notion links can be searched and fetched without an integration token',async()=>{
+  const root='01234567-89ab-cdef-0123-456789abcdef';
+  const child='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const publicLink='https://example.notion.site/공개-문서-0123456789abcdef0123456789abcdef';
+  const calls=[];
+  const client=new NotionClient({getToken:async()=>'',getPublicLinks:async()=>[publicLink],fetchImpl:async(url,options)=>{
+    calls.push({url,options});
+    return response(200,{recordMap:{block:{
+      [root]:{value:{value:{id:root,type:'page',properties:{title:[['공개 문서']]},content:[child],last_edited_time:1780000000000}}},
+      [child]:{value:{value:{id:child,type:'text',properties:{title:[['학교 에이전트 사용법']]}}}},
+    }}});
+  }});
+  assert.equal(parsePublicNotionUrl(publicLink).pageId,root);
+  const page=await client.fetchPage(publicLink);
+  assert.equal(page.title,'공개 문서');
+  assert.match(page.text,/학교 에이전트 사용법/);
+  const search=await client.search({query:'에이전트'});
+  assert.equal(search.results[0].id,root);
+  assert.equal(search.results[0].public,true);
+  assert.match(calls[0].url,/api\/v3\/loadCachedPageChunk$/);
 });
