@@ -1,6 +1,6 @@
 const ORIGIN = 'https://ai.koreatech.ac.kr';
 function validRoute(route, method) {
-  return method === 'GET' && (/^\/(models|usage\/remaining|agents\?limit=50|agents\/public\?limit=50)$/.test(route) || /^\/conversations\/[a-zA-Z0-9-]+\/messages$/.test(route)) || method === 'POST' && route === '/chat/completions';
+  return method === 'GET' && (/^\/(models|usage\/remaining|agents\?limit=50|agents\/public\?limit=50)$/.test(route) || /^\/conversations\/[a-zA-Z0-9-]+\/messages$/.test(route) || /^\/chat\/uploads\/[a-zA-Z0-9-]+$/.test(route)) || method === 'POST' && route === '/chat/completions';
 }
 function chatBody({message,model,agent,mode='default',conversationId},models=[]) {
   if (typeof message !== 'string' || !message.trim() || message.length>100000) throw Error('메시지는 1~100,000자여야 합니다.');

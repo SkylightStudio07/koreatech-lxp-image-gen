@@ -17,6 +17,7 @@
 - URL과 인증 JSON은 GitHub나 공개 채팅에 올리지 않습니다.
 - 이 서버의 도구가 학교 계정 할당량이나 이미지 생성 기능을 사용하면 사용량이 운영자 계정에 귀속될 수 있습니다.
 - 파일·Unity 프로젝트를 다루는 School Code Workspace MCP는 별도 서버입니다. 현재 한 번에 한 VS Code 워커만 지원하므로 이 공유 MCP와 합쳐 여러 명에게 배포하지 않습니다.
+- 0.7.0부터 Workspace MCP에는 승인 기반 `run_shell`과 백그라운드 셸 작업이 포함됩니다. 연결된 PC의 Windows 사용자 권한으로 명령이 실행될 수 있으므로 WORKER_TOKEN/MCP_TOKEN을 동아리 전체에 공유하지 말고, 신뢰하는 개인별 릴레이와 `매번 확인` 승인 모드를 사용합니다.
 - Notion 토큰, WORKER_TOKEN, Unity Editor 토큰은 각자의 PC에만 저장합니다.
 ```
 

@@ -11,6 +11,9 @@ function normalize(input,now=Date.now()){
     agent:typeof value.agent==='string'?value.agent:'',
     mode:['default','fast','deep','direct'].includes(value.mode)?value.mode:'default',
     approvalMode:['ask','read','full'].includes(value.approvalMode)?value.approvalMode:'ask',
+    contextCompaction:value.contextCompaction===true,
+    compactionThreshold:Number.isFinite(value.compactionThreshold)?Math.min(90000,Math.max(16000,Math.trunc(value.compactionThreshold))):60000,
+    contextSummary:typeof value.contextSummary==='string'?value.contextSummary.slice(0,18000):'',
     createdAt:Number.isFinite(value.createdAt)?value.createdAt:now,
     updatedAt:Number.isFinite(value.updatedAt)?value.updatedAt:now,
   };

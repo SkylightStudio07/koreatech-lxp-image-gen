@@ -24,3 +24,17 @@ test('Chrome worker refreshes bridge tokens, does not duplicate, and keeps schoo
  assert(calls.filter(c=>c.url.startsWith('http:')).every(c=>!JSON.stringify(c).includes('school-only')));
  const existing={active:true,port:18766};context.window.__schoolCodeWorker=existing;const before=calls.length;await vm.runInNewContext(`(${browserWorker.toString()})(18766)`,context);assert.equal(calls.length,before);
 });
+test('Chrome worker converts an image upload response to bounded Base64 metadata',async()=>{
+ const calls=[];let finish;const ready=new Promise(r=>finish=r),window={};
+ const fakeFetch=async(url,opts={})=>{
+  calls.push({url,opts});
+  if(url.endsWith('/connector/connect'))return {ok:true,json:async()=>({product:'school-code',workerToken:'worker'})};
+  if(url.endsWith('/worker/poll'))return {ok:true,json:async()=>({id:'image-job',route:'/chat/uploads/generated-1',method:'GET',binary:true})};
+  if(url==='/api/AiCA/api/v1/chat/uploads/generated-1')return {ok:true,arrayBuffer:async()=>Uint8Array.from([137,80,78,71]),headers:{get:()=> 'image/png'}};
+  if(url.endsWith('/worker/event')){const data=JSON.parse(opts.body);if(data.done){assert.equal(data.result.contentType,'image/png');assert.equal(data.result.size,4);assert.equal(data.result.base64,'iVBORw==');window.__schoolCodeWorker.stop();finish();}return {ok:true,json:async()=>({})};}
+  return {ok:true,json:async()=>({})};
+ };
+ const context={window,location:{origin:'https://ai.koreatech.ac.kr'},document:{cookie:'csrf_token=school-only'},fetch:fakeFetch,AbortController,AbortSignal,TextDecoder,btoa:value=>Buffer.from(value,'binary').toString('base64'),alert:()=>{},setTimeout:(f)=>setTimeout(f,1),setInterval:f=>setInterval(f,10000),clearInterval};
+ const running=vm.runInNewContext(`(${browserWorker.toString()})(18766)`,context);await ready;await running;
+ assert.equal(calls.find(c=>c.url==='/api/AiCA/api/v1/chat/uploads/generated-1').opts.headers['X-CSRF-Token'],'school-only');
+});

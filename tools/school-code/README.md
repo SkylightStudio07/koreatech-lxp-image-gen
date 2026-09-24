@@ -1,4 +1,4 @@
-# KOREATECH School Code — 0.6.0 preview
+# KOREATECH School Code — 0.7.1 preview
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
@@ -6,7 +6,7 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 
 ## 설치와 채팅
 
-1. VS Code에 school-code-0.6.0.vsix를 설치합니다.
+1. VS Code에 `school-code-0.7.1.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -18,12 +18,16 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 
 - **기본 / 빠른 / 깊은 / 다이렉트**를 학교 API의 `fast`, `deep`, `direct` 필드로 전달합니다. 빠른 모드의 최종 모델 라우팅은 학교 서버가 결정합니다. 학교 웹 UI는 빠른 모드 선택 시 모델도 자동 변경하지만 이 확장은 선택 모델을 유지합니다.
 - 깊은 응답은 `/models`의 고급 모델만 허용합니다. 에이전트는 기본 모드를 사용합니다.
+- 모델과 에이전트는 패널에서 별도 선택합니다. 하나를 고르면 다른 선택은 비워지며, 에이전트를 고르면 응답 방식은 기본으로 고정됩니다.
 - **선택 코드**는 입력창에 추가되며, 전송 버튼을 누를 때 학교 AI로 전송됩니다.
 - 대화 ID를 유지하여 후속 질문을 이어갑니다. **＋**는 확장에 표시된 대화를 초기화합니다. 학교 서버의 기존 대화는 삭제하지 않습니다.
 - 대화 세션은 패널의 세션 목록에서 분리됩니다. 새 대화·이름 변경·삭제가 가능하며 세션마다 학교 대화 ID, 모델, 에이전트, 응답 모드와 도구 승인 설정을 따로 저장합니다.
+- 세션별 **컨텍스트 압축**을 선택할 수 있습니다. 켜면 약 3.2만·6만·9만자 기준을 넘을 때 오래된 대화를 로컬 요약으로 묶고 새 학교 대화 ID로 이어갑니다. 서버가 자동 압축을 지원하는지와 관계없이 이 세션에서만 확실하게 동작하며, 압축하지 않을 때는 기존 대화 ID를 그대로 유지합니다.
 - 도구 승인은 `매번 확인`, `읽기는 자동 승인 · 수정은 확인`, `모두 자동 승인` 중에서 세션별로 선택합니다. 기본값은 `매번 확인`이며, 자동 승인 모드에서도 프로젝트 루트·비밀 경로 제한은 유지됩니다.
 - 중단 시 브라우저가 진행 중인 요청을 취소합니다. 이미 학교 서버에서 처리된 이용량까지 취소되는 것은 아닙니다. 자동 재전송하지 않습니다.
 - 대화는 VS Code의 해당 작업 영역 로컬 상태에 최근 100개 메시지까지 저장됩니다.
+- 학교 AI가 이미지 생성 결과를 첨부하면 Chrome의 로그인 탭에서 `/chat/uploads/{file_id}`를 받아 대화 안에 PNG/JPEG/WebP/GIF/SVG 미리보기로 표시합니다. 이미지 본문은 세션 저장소에 저장하지 않고 현재 확장 실행 중인 메모리에만 보관합니다.
+- 답변에 안전한 `svg` 코드 블록이 포함된 경우에도 대화 안에서 SVG 미리보기를 함께 표시합니다. 스크립트·이벤트 핸들러·외부 HTTP 참조가 있는 SVG는 코드로만 표시합니다.
 
 ## 연결된 프로젝트와 작업 공간 도구
 
@@ -114,11 +118,13 @@ SSE 전송 방식이 아니라 **HTTP**를 선택하세요. 이 서버는 statel
 
 추천 에이전트 지침:
 
-> 사용자의 VS Code 프로젝트를 돕는 코딩 도우미입니다. 파일을 추측하지 말고 workspace_info, list_files, read_file, search_text로 확인합니다. 수정 전 read_file에서 최신 SHA-256을 받고 propose_edit의 expected_sha256에 전달합니다. propose_edit는 파일 전체 내용을 사용합니다. 사용자 승인 거절, 시간 초과, 오프라인이면 반복 호출하지 말고 이유를 알려 주세요. 비밀 파일을 요청하지 마세요.
+> 사용자의 VS Code 프로젝트를 돕는 코딩 도우미입니다. 먼저 workspace_info로 도구와 제한을 확인하고 파일을 추측하지 말고 list_files, read_file, search_text로 확인합니다. 수정 전 read_file에서 최신 SHA-256을 받고 propose_edit의 expected_sha256에 전달합니다. propose_edit는 파일 전체 내용을 사용합니다. Unity CLI나 테스트처럼 명령 실행이 필요하면 run_shell을 사용하고, 90초를 넘길 작업은 start_background_task로 시작한 뒤 task_status/task_output으로 확인합니다. 명령 전체와 작업 디렉터리를 사용자에게 설명하고, 승인 거절·시간 초과·오프라인이면 반복 호출하지 말고 이유를 알려 주세요. 비밀 파일과 민감한 환경 변수를 요청하지 마세요.
 
 ### Notion 읽기 전용
 
-Notion에서 Internal Integration을 만든 뒤 읽을 페이지와 데이터베이스를 해당 integration에 **공유**합니다. VS Code 명령 팔레트에서 **School Code: Notion 연결 설정**을 실행하고 integration secret을 입력하세요. 토큰은 VS Code SecretStorage에만 저장되며 NAS 중계 서버로 복사하지 않습니다. 해제는 **School Code: Notion 연결 해제**입니다.
+Notion에서 Internal Integration을 만든 뒤 읽을 페이지와 데이터베이스를 해당 integration에 **공유**합니다. 패널의 **연결 및 외부 MCP → Notion 연결 설정**을 누르고 integration secret을 입력하세요. 토큰은 VS Code SecretStorage에만 저장되며 NAS 중계 서버로 복사하지 않습니다. 해제는 **Notion 연결 해제**입니다. 명령 팔레트의 같은 이름 명령도 사용할 수 있습니다.
+
+사용 순서는 `연결된 프로젝트` 선택 → **외부 MCP 연결** → Notion을 등록한 학교 **에이전트** 선택입니다. 이후 “Notion에서 `키워드`가 들어간 페이지를 찾아 요약해줘”처럼 질문하면 에이전트가 `notion_search`와 `notion_fetch_page`를 사용합니다. 페이지를 integration에 공유하지 않았거나 에이전트를 선택하지 않으면 Notion 도구가 호출되지 않습니다. 조회 요청은 도구 승인 설정에 따라 확인 창이 뜹니다.
 
 학교 에이전트에는 다음 읽기 전용 도구가 보입니다.
 
@@ -130,14 +136,26 @@ Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 �
 
 ### Unity CLI
 
-명령 팔레트의 **School Code: Unity CLI 경로 설정** 또는 `schoolCode.unityExecutable` 설정으로 Unity 실행 파일을 지정합니다. 에이전트가 사용할 수 있는 도구는 고정되어 있습니다.
+패널의 **연결 및 외부 MCP → Unity CLI 경로 설정** 또는 명령 팔레트의 **School Code: Unity CLI 경로 설정**에서 `Unity.exe` 경로를 지정합니다. `Unity.exe`가 PATH에 있으면 기본값 그대로 둘 수 있습니다. 에이전트가 사용할 수 있는 도구는 고정되어 있습니다.
+
+사용 순서는 Unity 프로젝트를 **연결된 프로젝트**로 선택 → Unity CLI 경로 설정 → **외부 MCP 연결** → 학교 **에이전트** 선택입니다. 예를 들어 “현재 Unity 프로젝트 정보를 확인하고 EditMode 테스트를 실행해줘” 또는 “Windows 빌드를 `Builds/windows/game.exe`에 만들어줘”라고 요청하면 에이전트가 적절한 CLI 도구를 고릅니다. 빌드와 에셋 새로 고침은 파일이 바뀔 수 있어 승인 창이 뜨며, 출력 경로는 프로젝트 내부 상대 경로만 허용합니다.
 
 - `unity_project_info`: Unity 버전·Assets·패키지 수 확인
 - `unity_run_tests`: EditMode 또는 PlayMode 테스트 실행
 - `unity_build`: `StandaloneWindows64`, `StandaloneLinux64`, `StandaloneOSX`, `WebGL` 빌드
 - `unity_refresh_assets`: batch mode로 에셋 임포트/새로 고침
 
-임의 셸 명령과 임의 `-executeMethod`는 제공하지 않습니다. 빌드 출력 경로는 연결된 프로젝트 안의 상대 경로만 허용합니다.
+Unity 공식 Skill이 요구하는 일반 CLI 작업은 아래 셸 하네스를 사용할 수 있습니다. 별도 승인을 거치며 작업 디렉터리는 연결된 프로젝트 내부로 제한됩니다.
+
+### 작업 하네스와 셸
+
+- `run_shell`: 연결된 프로젝트를 시작 디렉터리로 셸 명령을 실행합니다. 명령·작업 디렉터리·환경 변수·최대 90초 실행 시간·출력 상한을 적용하고, 파일이나 시스템을 바꿀 수 있으므로 쓰기 승인으로 처리합니다.
+- `start_background_task`: Unity 설치, 긴 테스트, 빌드처럼 오래 걸리는 작업을 시작하고 작업 ID를 반환합니다. `task_status`, `task_output`, `task_cancel`로 관리할 수 있으며 최대 30분입니다.
+- 민감한 환경 변수는 자식 프로세스에 전달하지 않습니다. 중계 연결이 끊기면 백그라운드 작업도 취소합니다.
+
+셸은 VS Code 확장의 작업 디렉터리에서 시작하지만 Windows 자체를 가상화하거나 OS 권한을 낮추지는 않습니다. `cd ..`, 절대 경로, 네트워크 명령처럼 프로젝트 밖에 영향을 주는 명령도 실행할 수 있으므로 `모두 자동 승인` 모드에서는 특히 주의해야 합니다.
+
+따라서 공식 `unity-cli` Skill의 지침을 읽을 수 있고, 그 지침이 요구하는 CLI 호출도 `run_shell` 또는 백그라운드 작업으로 실행할 수 있습니다. Unity 설치·라이선스·클라우드 로그인·원격 업로드처럼 프로젝트 밖에 영향을 주는 명령은 승인 창에서 명령 전체를 확인한 뒤 실행하세요. `unity_build` 같은 고정 도구는 계속 별도의 경로·대상 allowlist를 적용합니다.
 
 ### Unity Editor 실시간 브리지
 
@@ -147,9 +165,17 @@ Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 �
 
 ### 프로젝트 Skill 자동 로더
 
-연결된 프로젝트의 `.school-code/skills/<name>/SKILL.md`만 자동으로 검색합니다. `workspace_info`가 Skill 목록과 설명을 제공하고, 에이전트가 `read_skill`로 필요한 지침을 읽습니다. 저장소 전체의 `skills` 폴더를 재귀 검색하지 않으므로 `tools/school-image-mcp/skills` 같은 다른 도구의 Skill은 섞이지 않습니다.
+연결된 프로젝트의 표준 `.agents/skills/<name>/SKILL.md`와 프로젝트 전용 `.school-code/skills/<name>/SKILL.md`를 자동으로 검색합니다. 같은 이름의 Skill이 둘 다 있으면 `.school-code/skills`가 우선합니다. `workspace_info`가 Skill 목록과 설명을 제공하고, 에이전트가 `read_skill`로 필요한 지침을 읽습니다. 저장소 전체의 `skills` 폴더를 재귀 검색하지 않으므로 `tools/school-image-mcp/skills` 같은 다른 도구의 Skill은 섞이지 않습니다.
 
-이 저장소에는 `notion-research`, `unity-game-dev`, `unity-build` 예제가 포함되어 있습니다. 다른 프로젝트에서도 같은 `.school-code/skills` 구조로 추가할 수 있습니다.
+Unity 공식 Skill은 프로젝트 터미널에서 다음처럼 설치할 수 있습니다.
+
+```powershell
+npx skills add Unity-Technologies/skills
+```
+
+설치된 `unity-cli` 지침은 `.agents/skills`에서 읽힙니다. 고정 Unity 도구 외의 공식 CLI 작업은 `run_shell`/`start_background_task`를 통해 별도 승인 후 실행됩니다. Editor 임의 C# 실행은 여전히 Unity Editor 브리지에 노출하지 않습니다.
+
+이 저장소에는 `notion-research`, `unity-game-dev`, `unity-build` 예제가 포함되어 있습니다. 프로젝트별 지침이나 공식 Skill을 덮어쓸 때는 `.school-code/skills`에 같은 구조로 추가할 수 있습니다.
 
 ### 제공 도구
 
@@ -159,7 +185,9 @@ Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 �
 - `search_text`: 문자열 검색
 - `read_asset_metadata`: 바이너리 내용을 전송하지 않고 크기·형식·수정 시각·SHA-256 확인
 - `read_instructions`: `AGENTS.md`, `CODEX.md`, `CLAUDE.md` 등의 프로젝트 지침 읽기
-- `read_skill`: 프로젝트 `.school-code/skills` 지침 읽기
+- `read_skill`: 프로젝트 `.school-code/skills` 또는 `.agents/skills` 지침 읽기 (`.school-code` 우선)
+- `run_shell`: 승인된 프로젝트 내부 셸 명령 실행
+- `start_background_task`, `task_status`, `task_output`, `task_cancel`: 장시간 셸 작업 관리
 - `propose_edit`: 전체 파일 수정안 → VS Code diff → 승인 → 적용·저장
 
 읽기·검색·수정은 **건별 승인**합니다. 수정은 검토 중 파일이 바뀌면 거절됩니다. 작업은 120초 후 만료되므로 승인 알림을 확인하세요. 로컬 프로젝트 하나만 연결되며 다른 창이 중계를 동시에 점유할 수 없습니다. `.env`, 키 파일, `.git`, `.ssh`, 의존성 폴더, 심볼릭 링크/정션, 상위 경로 접근을 차단합니다. 임의 터미널 실행·파일 삭제·디렉터리 생성은 이 버전에서 제공하지 않습니다.
@@ -170,7 +198,7 @@ Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 �
 
 학교에서 확인된 정보: 모델 14개, Astra/Fable ID, 모델 목록과 에이전트 목록 API, `fast/deep/direct`, `agent_id`, SSE 이벤트 형식. 외부 HTTPS 배포와 학교 MCP→실제 VS Code 작업의 전체 경로는 실제 서버 주소와 브라우저 연결 후 별도 검증해야 합니다.
 
-현재는 프로젝트 도구 중심의 텍스트 채팅과 선택 코드 전송을 지원합니다. Notion 읽기 전용 조회, allowlist Unity CLI, Unity Editor 로컬 브리지, `.school-code/skills` 자동 로딩을 제공합니다. 이미지/PDF/문서 업로드, 기존 대화 목록 가져오기, 완전한 Markdown 렌더링, 임의 셸 실행은 아직 없습니다. 바이너리 자산은 메타데이터만 확인합니다.
+현재는 프로젝트 도구 중심의 텍스트 채팅과 선택 코드 전송, 이미지 생성 결과 미리보기를 지원합니다. Notion 읽기 전용 조회, allowlist Unity 도구, 승인 기반 프로젝트 셸 하네스, 선택형 컨텍스트 압축, Unity Editor 로컬 브리지, `.agents/skills` 및 `.school-code/skills` 자동 로딩을 제공합니다. 이미지/PDF/문서의 참조 업로드, 기존 대화 목록 가져오기, 완전한 Markdown 렌더링, 서브에이전트는 아직 없습니다. 프로젝트 바이너리 자산은 계속 메타데이터만 확인합니다.
 
 ## 개발
 

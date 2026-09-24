@@ -12,19 +12,70 @@ const {NotionClient}=require('./notion.cjs');
 const unity=require('./unity.cjs');
 const {UnityEditorClient}=require('./unity-editor.cjs');
 const skills=require('./skills.cjs');
+const {runShell,TaskManager}=require('./harness.cjs');
+const {compactMessages,estimateMessages,threshold:compactThreshold}=require('./compaction.cjs');
 
 function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
   const port=vscode.workspace.getConfiguration('schoolCode').get('bridgePort',18766);
   const bridge=new BrowserBridge(port);let bridgeError='';const ready=bridge.start().catch(e=>{bridgeError=e.code==='EADDRINUSE'?'브리지 포트가 사용 중입니다. 다른 VS Code 창을 닫거나 bridgePort를 변경하세요.':e.message;output.appendLine(bridgeError);});context.subscriptions.push({dispose:()=>bridge.dispose()});
   let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,projectBusy=false;
+  const imagePreviews=new Map(),imageLoads=new Map();
   const projectContext=new ProjectContext(vscode,context.workspaceState);
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
   const notion=new NotionClient({getToken:()=>context.secrets.get('schoolCode.notion.integrationToken')});
   const unityEditor=new UnityEditorClient({getToken:()=>context.secrets.get('schoolCode.unity.editorToken'),getPort:()=>vscode.workspace.getConfiguration('schoolCode').get('unityEditorPort',18777)});
+  const taskManager=new TaskManager();
   const post=m=>view?.webview.postMessage(m);
   const save=async()=>{sessionStore.update(state);await sessionStore.save();};
   function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,busy:!!controller,projectBusy,projectContext:projectContext.info()});}
+  function cleanAttachments(value){
+    const list=Array.isArray(value)?value:[];
+    return list.map(a=>{
+      if(!a||typeof a!=='object'||!/^[a-zA-Z0-9-]{1,200}$/.test(String(a.file_id||'')))return null;
+      const item={file_id:String(a.file_id)};
+      if(typeof a.filename==='string'&&a.filename.trim())item.filename=a.filename.trim().slice(0,240);
+      if(typeof a.file_type==='string')item.file_type=a.file_type.slice(0,80);
+      if(Number.isFinite(a.file_size)&&a.file_size>=0)item.file_size=a.file_size;
+      return item;
+    }).filter(Boolean);
+  }
+  function isImageAttachment(a){
+    const type=String(a.file_type||'').toLowerCase(),name=String(a.filename||'').toLowerCase();
+    return type==='image'||type.startsWith('image/')||/\.(png|jpe?g|webp|gif|svg|avif|bmp|ico|tiff?)$/.test(name);
+  }
+  function previewMime(a,result){
+    const fromResponse=String(result?.contentType||'').split(';',1)[0].toLowerCase();
+    const allowed=/^image\/(png|jpe?g|webp|gif|svg\+xml|avif|bmp|x-icon|tiff)$/.test(fromResponse);
+    if(allowed)return fromResponse==='image/jpg'?'image/jpeg':fromResponse;
+    const ext=String(a.filename||'').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+    return ({png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',svg:'image/svg+xml',avif:'image/avif',bmp:'image/bmp',ico:'image/x-icon',tif:'image/tiff',tiff:'image/tiff'})[ext]||null;
+  }
+  function postImagePreviews(){post({type:'attachmentPreviews',previews:[...imagePreviews.values()]});}
+  async function loadImageAttachment(input){
+    const a=cleanAttachments([input])[0];if(!a||!isImageAttachment(a))return null;
+    if(imagePreviews.has(a.file_id))return imagePreviews.get(a.file_id);
+    if(imageLoads.has(a.file_id))return imageLoads.get(a.file_id);
+    const task=(async()=>{
+      const result=await bridge.request(`/chat/uploads/${encodeURIComponent(a.file_id)}`,{binary:true});
+      const base64=String(result?.base64||'');
+      if(!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)||base64.length>45*1024*1024)throw Error('이미지 미리보기 응답이 올바르지 않습니다.');
+      const size=Number(result?.size)||Math.floor(base64.length*3/4);
+      if(size<=0||size>32*1024*1024)throw Error('이미지 미리보기 크기가 제한을 초과했습니다.');
+      const mime=previewMime(a,result);if(!mime)throw Error('지원하지 않는 이미지 형식입니다.');
+      const preview={file_id:a.file_id,filename:a.filename||`image-${a.file_id}`,mime,dataUrl:`data:${mime};base64,${base64}`,size};
+      imagePreviews.set(a.file_id,preview);while(imagePreviews.size>20)imagePreviews.delete(imagePreviews.keys().next().value);return preview;
+    })();
+    imageLoads.set(a.file_id,task);try{return await task;}finally{imageLoads.delete(a.file_id);}
+  }
+  async function preloadAttachments(value){
+    const list=cleanAttachments(value).filter(isImageAttachment);if(!list.length)return;
+    await Promise.allSettled(list.map(loadImageAttachment));postImagePreviews();
+  }
+  async function hydrateAttachments(session){
+    const found=new Map();for(const message of session?.messages||[])for(const a of cleanAttachments(message.attachments).filter(isImageAttachment))found.set(a.file_id,a);
+    await preloadAttachments([...found.values()].slice(-20));
+  }
   async function connectBrowser(){await ready;if(bridgeError)throw Error(bridgeError);await vscode.env.openExternal(vscode.Uri.parse('https://ai.koreatech.ac.kr/AiCA/chat'));vscode.window.showInformationMessage('School Code Connector가 설치되어 있으면 자동 연결됩니다. 최초 설치: 확장 폴더 열기 → Chrome 확장 프로그램에서 압축해제된 확장 로드.');}
   async function configureNotion(){
     const existing=await context.secrets.get('schoolCode.notion.integrationToken');
@@ -39,7 +90,7 @@ function activate(context){
   async function configureUnity(){
     const config=vscode.workspace.getConfiguration('schoolCode');
     const current=config.get('unityExecutable','');
-    const executable=await vscode.window.showInputBox({title:'Unity 실행 파일 경로',prompt:'Unity.exe 경로 또는 PATH에 등록된 Unity.exe를 입력하세요. 임의 셸 명령은 실행하지 않습니다.',value:current||'Unity.exe',ignoreFocusOut:true});
+    const executable=await vscode.window.showInputBox({title:'Unity 실행 파일 경로',prompt:'Unity.exe 경로 또는 PATH에 등록된 Unity.exe를 입력하세요. 셸 도구는 별도 승인 후 프로젝트 안에서만 실행됩니다.',value:current||'Unity.exe',ignoreFocusOut:true});
     if(!executable||typeof config.update!=='function')return;
     await config.update('unityExecutable',executable.trim(),vscode.ConfigurationTarget?.Global??true);
     vscode.window.showInformationMessage('Unity CLI 경로를 저장했습니다.');
@@ -55,7 +106,10 @@ function activate(context){
   }
   async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50');agents=[...new Map([...(own.items||[]),...(pub.items||[])].map(a=>[a.id,{id:a.id,name:a.name}])).values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
   async function send(data){if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
-    const message=String(data.message||'');if(!message.trim())throw Error('질문을 입력하세요.');const composed=projectContext.compose(message);const body=chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId},models);
+    const message=String(data.message||'');if(!message.trim())throw Error('질문을 입력하세요.');
+    let compacted=null;
+    if(state.contextCompaction&&!state.contextSummary){const limit=compactThreshold(state.compactionThreshold);if(estimateMessages([...state.messages,{role:'user',text:message}])>limit)compacted=compactMessages(state.messages,Math.max(16000,limit-message.length));if(compacted){state.messages=compacted.messages;state.contextSummary=compacted.summary;state.conversationId=null;post({type:'notice',text:`컨텍스트를 압축했습니다. 이전 메시지 ${compacted.removed}개를 요약하고 새 대화 맥락으로 이어갑니다.`});await save();snapshot();}}
+    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+message);const body=chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId},models);
     const info=projectContext.info();
     state.model=data.model;state.agent=data.agent||'';state.mode=data.mode;if(state.title==='새 대화')state.title=message.replace(/\s+/g,' ').trim().slice(0,48)||'새 대화';state.messages.push({role:'user',text:message,project:info.files.length?info.project?.name:undefined,contextFiles:info.files});projectContext.clear();const answer={role:'assistant',text:'',status:'응답 중'};state.messages.push(answer);
     controller=new AbortController();post({type:'accepted'});snapshot();let done=false;
@@ -64,9 +118,9 @@ function activate(context){
       if(event.type==='delta'||event.type==='token'){answer.text+=event.content??event.delta??'';post({type:'stream',text:answer.text,status:answer.status});}
       if(event.type==='waiting'||event.type==='image_generating'||event.type==='image_editing'){answer.status=event.reason||'학교 AI 처리 중';post({type:'stream',text:answer.text,status:answer.status});}
       if(event.type==='error')throw Error(String(event.content||event.error||'학교 응답 오류').slice(0,300));
-      if(event.type==='done'){done=true;answer.status='완료';answer.model=event.model_id;answer.attachments=event.attachments;answer.finish_reason=event.finish_reason;if(!answer.text&&event.content)answer.text=event.content;}
+      if(event.type==='done'){done=true;answer.status='완료';answer.model=event.model_id;answer.attachments=cleanAttachments(event.attachments);answer.finish_reason=event.finish_reason;if(!answer.text&&event.content)answer.text=event.content;if(compacted||summaryPrefix)state.contextSummary='';}
     });
-    try{await bridge.request('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 재전송은 자동으로 하지 않습니다.');}
+    try{await bridge.request('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 재전송은 자동으로 하지 않습니다.');await preloadAttachments(answer.attachments);}
     catch(e){answer.status=e.message;}
     finally{controller=null;await save();snapshot();}
   }
@@ -96,7 +150,7 @@ function activate(context){
     const notionTool=job.name.startsWith('notion_');
     if(job.name==='workspace_info'){
       const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
-      return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:!!vscode.workspace.getConfiguration('schoolCode').get('unityExecutable',''),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000}};
+      return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:!!vscode.workspace.getConfiguration('schoolCode').get('unityExecutable',''),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
       if(!await approval(`학교 AI가 Notion 읽기 도구 ${job.name}을 요청했습니다. 공유된 페이지 내용이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
@@ -104,6 +158,22 @@ function activate(context){
       if(job.name==='notion_search')return notion.search(args);
       if(job.name==='notion_fetch_page')return notion.fetchPage(args.page_id);
       if(job.name==='notion_list_children')return notion.listChildren(args);
+    }
+    if(job.name==='run_shell'){
+      if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트에서 셸 명령을 실행하려 합니다.\n명령: ${String(args.command||'').slice(0,500)}\n작업 디렉터리: ${args.cwd||'.'}\n현재 Windows 사용자 권한으로 실행되며 프로젝트 밖에도 영향을 줄 수 있습니다.`,{write:true}))throw Error('사용자가 거절했습니다.');
+      await ensureActive();const result=await runShell(root,args);if(result.stdout)result.stdout=result.stdout.replaceAll(root,'<project>');if(result.stderr)result.stderr=result.stderr.replaceAll(root,'<project>');return result;
+    }
+    if(job.name==='start_background_task'){
+      if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트에서 백그라운드 셸 작업을 시작하려 합니다.\n명령: ${String(args.command||'').slice(0,500)}\n작업 디렉터리: ${args.cwd||'.'}\n현재 Windows 사용자 권한으로 실행되며 최대 실행 시간은 ${Math.round((Number(args.max_runtime_ms)||1800000)/60000)}분입니다.`,{write:true}))throw Error('사용자가 거절했습니다.');
+      await ensureActive();return taskManager.start(root,args);
+    }
+    if(job.name==='task_status'||job.name==='task_output'){
+      if(!await approval(`학교 AI가 백그라운드 셸 작업 ${args.task_id}의 상태/출력을 읽으려 합니다.`))throw Error('사용자가 거절했습니다.');
+      await ensureActive();return job.name==='task_status'?taskManager.status(args.task_id,root):taskManager.output(args.task_id,root,args.max_chars);
+    }
+    if(job.name==='task_cancel'){
+      if(!await approval(`학교 AI가 백그라운드 셸 작업 ${args.task_id}를 취소하려 합니다.`,{write:true}))throw Error('사용자가 거절했습니다.');
+      await ensureActive();return taskManager.cancel(args.task_id,root);
     }
     const unityTool=['unity_project_info','unity_run_tests','unity_build','unity_refresh_assets'].includes(job.name);
     if(unityTool){
@@ -127,7 +197,7 @@ function activate(context){
       await ensureActive();return unityEditor.call(job.name,args);
     }
     if(job.name==='read_skill'){
-      if(!await approval(`학교 AI가 프로젝트 Skill ${args.name}을 읽으려 합니다. .school-code/skills 안의 지침이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
+      if(!await approval(`학교 AI가 프로젝트 Skill ${args.name}을 읽으려 합니다. 프로젝트의 .school-code/skills 또는 .agents/skills 안의 지침이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
       await ensureActive();return skills.readSkill(root,args.name);
     }
     if(!['list_files','read_file','search_text','read_asset_metadata','read_instructions','propose_edit'].includes(job.name))throw Error('지원하지 않는 도구');
@@ -164,7 +234,7 @@ function activate(context){
       return {applied:true,path:args.path,sha256:workspace.sha(Buffer.from(args.content))};
     }finally{previews.delete(left.toString());previews.delete(right.toString());}
   }
-  async function disconnectRelay(){relayController?.abort();relayController=null;relayRoot=null;relayConnected=false;if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
+  async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
   async function connectRelay(){
     if(relayController)return vscode.window.showInformationMessage('이미 연결 중입니다. 먼저 외부 MCP 연결을 해제하세요.');
     if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역이 필요합니다.');
@@ -187,13 +257,17 @@ function activate(context){
     }catch(e){relayConnected=false;snapshot();if(ctl.signal.aborted)break;output.appendLine(e.message);await new Promise(resolve=>{const onAbort=()=>{clearTimeout(t);resolve();};const t=setTimeout(()=>{ctl.signal.removeEventListener('abort',onAbort);resolve();},3000);ctl.signal.addEventListener('abort',onAbort,{once:true});});}}}catch(e){if(!ctl.signal.aborted){output.appendLine(e.message);post({type:'notice',text:e.message});}}finally{clearInterval(heartbeat);if(relayController===ctl){relayController=null;relayConnected=false;snapshot();}}})();
   }
   async function handle(m){try{
-    if(m.type==='ready'){snapshot();return;}
+    if(m.type==='ready'){snapshot();postImagePreviews();void hydrateAttachments(state);return;}
     if(['projectChoose','attachFiles','attachFolder','attachmentPreview','attachmentRemove','attachmentsClear'].includes(m.type))return await projectAction(m.type,m.path);
     if(m.type==='connect')return await connectBrowser();
     if(m.type==='connectorFolder')return await vscode.commands.executeCommand('revealFileInOS',vscode.Uri.joinPath(context.extensionUri,'chrome-extension','manifest.json'));
     if(m.type==='refresh')return await refresh();
+    if(m.type==='notionConfigure')return await configureNotion();
+    if(m.type==='notionDisconnect')return await disconnectNotion();
+    if(m.type==='unityConfigure')return await configureUnity();
+    if(m.type==='unityEditorConfigure')return await configureUnityEditor();
     if(m.type==='send')return await send(m);
-    if(m.type==='choices'&&!controller){state.model=String(m.model||'');state.agent=String(m.agent||'');state.mode=['default','fast','deep','direct'].includes(m.mode)?m.mode:'default';state.approvalMode=['ask','read','full'].includes(m.approvalMode)?m.approvalMode:'ask';await save();snapshot();return;}
+    if(m.type==='choices'&&!controller){state.model=String(m.model||'');state.agent=String(m.agent||'');state.mode=['default','fast','deep','direct'].includes(m.mode)?m.mode:'default';state.approvalMode=['ask','read','full'].includes(m.approvalMode)?m.approvalMode:'ask';state.contextCompaction=m.contextCompaction===true;state.compactionThreshold=compactThreshold(m.compactionThreshold);await save();snapshot();return;}
     if(m.type==='stop'){controller?.abort();return;}
     if((m.type==='new'||m.type==='sessionNew')&&!controller){state=sessionStore.create();await sessionStore.save();snapshot();return;}
     if(m.type==='sessionSelect'&&!controller){await save();state=sessionStore.select(String(m.id||''));await sessionStore.save();snapshot();return;}
@@ -207,6 +281,6 @@ function activate(context){
   }catch(e){post({type:'notice',text:e.message});vscode.window.showErrorMessage('School Code: '+e.message);}}
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
   for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
-  const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();disconnectRelay();}});
+  const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();void disconnectRelay();void taskManager.dispose();}});
 }
 module.exports={activate};

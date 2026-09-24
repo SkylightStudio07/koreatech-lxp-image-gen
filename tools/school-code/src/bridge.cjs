@@ -3,7 +3,9 @@ const {randomBytes,randomUUID,timingSafeEqual}=require('node:crypto');
 const {ORIGIN,validRoute}=require('./protocol.cjs');
 function authorized(req,key){const a=Buffer.from(req.headers.authorization||''),b=Buffer.from('Bearer '+key);return a.length===b.length&&timingSafeEqual(a,b);}
 function json(res,status,data){if(!res.destroyed){res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));}}
-async function readJson(req,max=4*1024*1024){let size=0;const chunks=[];for await(const c of req){size+=c.length;if(size>max)throw Error('Request too large');chunks.push(c);}return JSON.parse(Buffer.concat(chunks).toString()||'{}');}
+// Binary attachment previews are returned as Base64 JSON from the browser worker.
+// Keep the limit bounded while allowing a 32 MiB image plus JSON/Base64 overhead.
+async function readJson(req,max=48*1024*1024){let size=0;const chunks=[];for await(const c of req){size+=c.length;if(size>max)throw Error('Request too large');chunks.push(c);}return JSON.parse(Buffer.concat(chunks).toString()||'{}');}
 class BrowserBridge {
   constructor(port=18766){this.port=port;this.key=randomBytes(32).toString('hex');this.jobs=new Map();this.lastSeen=0;}
   get connected(){return Date.now()-this.lastSeen<35000;}
@@ -34,14 +36,14 @@ class BrowserBridge {
     json(res,200,{ok:true});
   }
   dispatch(){if(!this.poll)return;const job=[...this.jobs.values()].find(j=>!j.delivered);if(!job)return;job.delivered=true;clearTimeout(this.poll.timer);json(this.poll.res,200,job.payload);this.poll=null;}
-  request(route,{method='GET',body,stream=false,onChunk,signal}={}){
+  request(route,{method='GET',body,stream=false,binary=false,onChunk,signal}={}){
     if(!validRoute(route,method))return Promise.reject(Error('허용되지 않은 경로'));
     if(!this.connected)return Promise.reject(Error('학교 브라우저를 연결하세요. 상단 브라우저 연결 버튼을 사용하세요.'));
     if(this.jobs.size>=4)return Promise.reject(Error('브라우저 요청이 처리 중입니다.'));
     if(signal?.aborted)return Promise.reject(Error('중단됨'));
     return new Promise((resolve,reject)=>{const id=randomUUID();const abort=()=>finish(Error('중단됨'));const timer=setTimeout(()=>finish(Error('학교 응답 시간 초과. 자동 재전송하지 않습니다.')),610000);
       const finish=(err,data)=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);this.jobs.delete(id);err?reject(err):resolve(data);};
-      this.jobs.set(id,{payload:{id,route,method,body,stream},onChunk,finish,delivered:false});signal?.addEventListener('abort',abort,{once:true});this.dispatch();
+      this.jobs.set(id,{payload:{id,route,method,body,stream,binary},onChunk,finish,delivered:false});signal?.addEventListener('abort',abort,{once:true});this.dispatch();
     });
   }
   dispose(){for(const j of this.jobs.values())j.finish(Error('연결 종료'));if(this.poll){clearTimeout(this.poll.timer);json(this.poll.res,200,{});this.poll=null;}this.server?.close();this.server?.closeAllConnections();}
