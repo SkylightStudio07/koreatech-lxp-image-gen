@@ -100,6 +100,22 @@ $("prompt").addEventListener('paste', e => {
   if (files.length) { e.preventDefault(); void addUploadFiles(files); }
 });
 
+function softenWheelScroll(element) {
+  if (!element) return;
+  element.addEventListener('wheel', e => {
+    if (e.ctrlKey || e.shiftKey || !e.deltaY) return;
+    const nested = e.target.closest?.('pre, #attachmentList');
+    if (nested && nested.scrollHeight > nested.clientHeight) return;
+    const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? element.clientHeight : 1;
+    const delta = Math.max(-120, Math.min(120, e.deltaY * unit * 0.55));
+    if (!delta) return;
+    e.preventDefault();
+    element.scrollTop += delta;
+  }, { passive: false });
+}
+softenWheelScroll($('messages'));
+softenWheelScroll($('settingsView'));
+
 function mcpStatus(status) {
   return ({ connected: '연결됨', pending: '승인 대기 중', configured: '설정됨', error: '오류', 'not-connected': '연결 안 됨', 'not-configured': '미설정', disabled: '꺼짐' })[status] || status || '미설정';
 }
@@ -282,6 +298,8 @@ function renderAttachments(container, attachments) {
 
 function render() {
   const main = $('messages');
+  const previousScrollTop = main.scrollTop;
+  const wasNearBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 64;
   main.replaceChildren();
   if (!messages.length) {
     const empty = document.createElement('section'), title = document.createElement('h2'), p = document.createElement('p');
@@ -296,7 +314,7 @@ function render() {
     if (m.attachments?.length) renderAttachments(article, m.attachments);
     main.append(article);
   }
-  main.scrollTop = main.scrollHeight;
+  main.scrollTop = wasNearBottom ? main.scrollHeight : previousScrollTop;
 }
 
 window.addEventListener('message', ({ data: m }) => {
