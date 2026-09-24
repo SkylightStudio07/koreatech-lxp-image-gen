@@ -7,8 +7,36 @@ let agents = [];
 let sessions = [];
 let attachmentPreviews = new Map();
 
-for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'new', 'sessionNew', 'sessionRename', 'selection', 'relay', 'disconnectRelay', 'stop']) {
+for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'new', 'sessionNew', 'sessionRename', 'selection', 'relay', 'disconnectRelay', 'stop']) {
   $(type).addEventListener('click', () => vscode.postMessage({ type: type === 'new' ? 'sessionNew' : type }));
+}
+
+function mcpStatus(status) {
+  return ({ connected: '연결됨', configured: '설정됨', 'not-connected': '연결 안 됨', 'not-configured': '미설정', disabled: '꺼짐' })[status] || status || '미설정';
+}
+
+function renderMcp(m) {
+  const list = $('mcpList');
+  if (!list) return;
+  list.replaceChildren();
+  const catalog = m.mcpCatalog || [];
+  if (!catalog.length) { const empty = document.createElement('p'); empty.className = 'mcp-empty'; empty.textContent = '등록된 MCP가 없습니다.'; list.append(empty); return; }
+  for (const item of catalog) {
+    const row = document.createElement('div'); row.className = 'mcp-row' + (item.enabled === false ? ' disabled' : '');
+    const info = document.createElement('div'); info.className = 'mcp-info';
+    const title = document.createElement('strong'); title.textContent = item.name;
+    const desc = document.createElement('small'); desc.textContent = item.description;
+    const status = document.createElement('span'); status.className = 'mcp-status'; status.textContent = mcpStatus(item.enabled === false ? 'disabled' : item.status);
+    info.append(title, desc, status);
+    const actions = document.createElement('div'); actions.className = 'mcp-actions';
+    const configure = document.createElement('button'); configure.textContent = item.configured ? '설정' : '연결'; configure.title = item.description; configure.disabled = !!m.busy; configure.addEventListener('click', () => vscode.postMessage({ type: 'mcpConfigure', id: item.id }));
+    actions.append(configure);
+    if (item.configured) {
+      const toggle = document.createElement('button'); toggle.textContent = item.enabled === false ? '켜기' : '끄기'; toggle.disabled = !!m.busy; toggle.addEventListener('click', () => vscode.postMessage({ type: 'mcpToggle', id: item.id, enabled: item.enabled === false })); actions.append(toggle);
+      const remove = document.createElement('button'); remove.textContent = '해제'; remove.disabled = !!m.busy; remove.addEventListener('click', () => vscode.postMessage({ type: 'mcpRemove', id: item.id })); actions.append(remove);
+    }
+    row.append(info, actions); list.append(row);
+  }
 }
 
 function renderSessions(m) {
@@ -177,7 +205,7 @@ function render() {
 
 window.addEventListener('message', ({ data: m }) => {
   if (m.type === 'state') {
-    models = m.models || []; agents = m.agents || []; messages = m.state.messages || []; busy = m.busy; connection(m); renderSessions(m);
+    models = m.models || []; agents = m.agents || []; messages = m.state.messages || []; busy = m.busy; connection(m); renderSessions(m); renderMcp(m);
     $('model').replaceChildren(); $('agent').replaceChildren();
     const modelPlaceholder = document.createElement('option'); modelPlaceholder.value = ''; modelPlaceholder.textContent = '모델을 선택하세요'; $('model').append(modelPlaceholder);
     for (const x of models.filter(x => x.available !== false)) { const option = document.createElement('option'); option.value = x.id; option.textContent = x.display_name || x.name || x.id; $('model').append(option); }

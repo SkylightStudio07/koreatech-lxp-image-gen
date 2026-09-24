@@ -2,7 +2,7 @@
   "name": "koreatech-school-code",
   "displayName": "KOREATECH School Code",
   "description": "학교 AI 채팅과 승인 기반 개발 도구를 VS Code에서 사용합니다.",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "publisher": "skylight-local",
   "license": "UNLICENSED",
   "private": true,
@@ -39,6 +39,18 @@
       {
         "command": "schoolCode.disconnectRelay",
         "title": "School Code: 외부 MCP 연결 해제"
+      },
+      {
+        "command": "schoolCode.mcpCatalog",
+        "title": "School Code: MCP 카탈로그 열기"
+      },
+      {
+        "command": "schoolCode.mcpAdd",
+        "title": "School Code: MCP 추가"
+      },
+      {
+        "command": "schoolCode.openMcpCatalog",
+        "title": "School Code: MCP 카탈로그 사이트 열기"
       },
       {
         "command": "schoolCode.notionConfigure",
@@ -92,6 +104,12 @@
           "scope": "application",
           "description": "외부 MCP 중계 서버 HTTPS 주소. 로컬 테스트는 http://127.0.0.1:18880"
         },
+        "schoolCode.mcpCatalogUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "원클릭 MCP 카탈로그 사이트 주소. 비워 두면 확장 내 카탈로그를 사용합니다."
+        },
         "schoolCode.unityExecutable": {
           "type": "string",
           "default": "Unity.exe",
@@ -114,7 +132,7 @@
     "test": "node --test test/*.test.cjs",
     "relay": "node dist/relay.cjs",
     "keys": "node scripts/keys.cjs",
-    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o school-code-0.7.1.vsix"
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o school-code-0.8.0.vsix"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.0",

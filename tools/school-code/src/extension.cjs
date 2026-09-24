@@ -14,6 +14,7 @@ const {UnityEditorClient}=require('./unity-editor.cjs');
 const skills=require('./skills.cjs');
 const {runShell,TaskManager}=require('./harness.cjs');
 const {compactMessages,estimateMessages,threshold:compactThreshold}=require('./compaction.cjs');
+const {McpRegistry}=require('./mcp-registry.cjs');
 
 function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
@@ -23,12 +24,26 @@ function activate(context){
   const imagePreviews=new Map(),imageLoads=new Map();
   const projectContext=new ProjectContext(vscode,context.workspaceState);
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
+  const mcpRegistry=new McpRegistry(context.workspaceState);
   const notion=new NotionClient({getToken:()=>context.secrets.get('schoolCode.notion.integrationToken')});
   const unityEditor=new UnityEditorClient({getToken:()=>context.secrets.get('schoolCode.unity.editorToken'),getPort:()=>vscode.workspace.getConfiguration('schoolCode').get('unityEditorPort',18777)});
   const taskManager=new TaskManager();
   const post=m=>view?.webview.postMessage(m);
   const save=async()=>{sessionStore.update(state);await sessionStore.save();};
-  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,busy:!!controller,projectBusy,projectContext:projectContext.info()});}
+  function mcpSnapshot(){
+    const config=vscode.workspace.getConfiguration('schoolCode');
+    const notionConfigured=!!mcpRegistry.get('notion');
+    const unityEditorConfigured=!!mcpRegistry.get('unity-editor');
+    return mcpRegistry.list().map(item=>{
+      let configured=item.configured,status=item.configured?'configured':'not-configured';
+      if(item.id==='school-workspace'){configured=configured||relayConnected;status=relayConnected?'connected':configured?'configured':'not-connected';}
+      if(item.id==='notion'){configured=notionConfigured;status=configured?'configured':'not-configured';}
+      if(item.id==='unity-cli'){configured=!!config.get('unityExecutable','');status=configured?'configured':'not-configured';}
+      if(item.id==='unity-editor'){configured=unityEditorConfigured;status=configured?'configured':'not-configured';}
+      return {...item,configured,status};
+    });
+  }
+  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
   function cleanAttachments(value){
     const list=Array.isArray(value)?value:[];
     return list.map(a=>{
@@ -83,16 +98,16 @@ function activate(context){
     if(!token)return;
     if(token.trim().length<20)throw Error('Notion 토큰이 너무 짧습니다.');
     const previous=existing;await context.secrets.store('schoolCode.notion.integrationToken',token.trim());
-    try{await notion.request('/users/me');vscode.window.showInformationMessage('Notion 읽기 전용 연결이 설정되었습니다.');}
+    try{await notion.request('/users/me');mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});await mcpRegistry.save();vscode.window.showInformationMessage('Notion 읽기 전용 연결이 설정되었습니다.');snapshot();}
     catch(e){if(previous)await context.secrets.store('schoolCode.notion.integrationToken',previous);else await context.secrets.delete('schoolCode.notion.integrationToken');throw e;}
   }
-  async function disconnectNotion(){await context.secrets.delete('schoolCode.notion.integrationToken');vscode.window.showInformationMessage('Notion 연결 토큰을 삭제했습니다.');}
+  async function disconnectNotion(){await context.secrets.delete('schoolCode.notion.integrationToken');mcpRegistry.remove('notion');await mcpRegistry.save();vscode.window.showInformationMessage('Notion 연결 토큰을 삭제했습니다.');snapshot();}
   async function configureUnity(){
     const config=vscode.workspace.getConfiguration('schoolCode');
     const current=config.get('unityExecutable','');
     const executable=await vscode.window.showInputBox({title:'Unity 실행 파일 경로',prompt:'Unity.exe 경로 또는 PATH에 등록된 Unity.exe를 입력하세요. 셸 도구는 별도 승인 후 프로젝트 안에서만 실행됩니다.',value:current||'Unity.exe',ignoreFocusOut:true});
     if(!executable||typeof config.update!=='function')return;
-    await config.update('unityExecutable',executable.trim(),vscode.ConfigurationTarget?.Global??true);
+    await config.update('unityExecutable',executable.trim(),vscode.ConfigurationTarget?.Global??true);mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});await mcpRegistry.save();snapshot();
     vscode.window.showInformationMessage('Unity CLI 경로를 저장했습니다.');
   }
   async function configureUnityEditor(){
@@ -101,8 +116,80 @@ function activate(context){
     if(!token)return;
     if(token.trim().length<20)throw Error('Unity Editor 브리지 토큰이 너무 짧습니다.');
     await context.secrets.store('schoolCode.unity.editorToken',token.trim());
-    try{await unityEditor.call('unity_find_gameobjects',{query:''});vscode.window.showInformationMessage('Unity Editor 브리지 연결이 확인되었습니다.');}
+    try{await unityEditor.call('unity_find_gameobjects',{query:''});mcpRegistry.upsert({id:'unity-editor',catalogId:'unity-editor',name:'Unity Editor MCP',description:'실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',kind:'local-mcp',enabled:true,capabilities:['unity','scene']});await mcpRegistry.save();vscode.window.showInformationMessage('Unity Editor 브리지 연결이 확인되었습니다.');snapshot();}
     catch(e){await context.secrets.delete('schoolCode.unity.editorToken');throw e;}
+  }
+  function safeRemoteUrl(raw){
+    let u;try{u=new URL(String(raw||''));}catch{throw Error('MCP 주소가 올바른 URL이 아닙니다.');}
+    const local=u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname);
+    if(u.protocol!=='https:'&&!local)throw Error('원격 MCP는 HTTPS 주소를 사용하세요. 로컬 테스트만 localhost HTTP를 허용합니다.');
+    if(u.username||u.password||u.search||u.hash)throw Error('MCP 주소에 사용자명·비밀번호·쿼리·해시를 넣을 수 없습니다.');
+    return u.origin+(u.pathname==='/'?'':u.pathname.replace(/\/$/,''));
+  }
+  async function configureRemoteMcp(id,seed={}){
+    const item=McpRegistry.catalogItem(id)||seed;
+    const current=mcpRegistry.get(id);
+    const raw=await vscode.window.showInputBox({title:`${item.name||'MCP'} 주소`,prompt:'MCP 서버의 HTTPS 주소를 입력하세요. 예: https://example.com/mcp',value:current?.url||'',ignoreFocusOut:true});
+    if(!raw)return;
+    const url=safeRemoteUrl(raw);
+    const secretKey=`schoolCode.mcp.token.${id}`;
+    const previous=await context.secrets.get(secretKey);
+    const token=await vscode.window.showInputBox({title:`${item.name||'MCP'} 토큰`,prompt:'Bearer 토큰이 있다면 입력하세요. 토큰은 VS Code SecretStorage에만 저장됩니다. 토큰 없이 공개 서버를 사용할 수도 있습니다.',password:true,value:previous||'',ignoreFocusOut:true});
+    if(token===undefined)return;
+    if(token.trim()&&token.trim().length<16)throw Error('MCP 토큰은 16자 이상이어야 합니다.');
+    if(token.trim())await context.secrets.store(secretKey,token.trim());else await context.secrets.delete(secretKey);
+    mcpRegistry.upsert({...item,...seed,id,catalogId:item.catalogId||item.id||id,url,enabled:true});await mcpRegistry.save();
+    vscode.window.showInformationMessage(`${item.name||'MCP'} 연결 정보를 저장했습니다. 학교 에이전트에서 이 MCP를 사용하려면 학교 MCP 카탈로그에서도 활성화하세요.`);snapshot();
+  }
+  async function configureMcp(id){
+    const item=McpRegistry.catalogItem(id)||mcpRegistry.get(id);
+    if(!item)throw Error('MCP 카탈로그 항목을 찾을 수 없습니다.');
+    if(id==='school-workspace')return connectRelay();
+    if(id==='notion')return configureNotion();
+    if(id==='unity-cli')return configureUnity();
+    if(id==='unity-editor')return configureUnityEditor();
+    return configureRemoteMcp(id,item);
+  }
+  async function chooseMcp(){
+    const entries=[...mcpRegistry.list().map(item=>({label:`${item.configured?'✓ ':'○ '}${item.name}`,description:item.description,detail:item.status, id:item.id})),{label:'＋ 사용자 지정 MCP 추가',description:'카탈로그에 없는 HTTPS MCP 서버를 추가합니다.',id:'custom'}];
+    const picked=await vscode.window.showQuickPick(entries,{title:'MCP 카탈로그',placeHolder:'연결하거나 관리할 MCP를 선택하세요.',ignoreFocusOut:true});
+    if(!picked)return;
+    if(picked.id==='custom'){
+      const name=await vscode.window.showInputBox({title:'사용자 지정 MCP 이름',value:'사용자 지정 MCP',ignoreFocusOut:true});if(!name)return;
+      return configureRemoteMcp(`custom-${randomUUID().slice(0,8)}`,{id:'custom',name,description:'사용자가 추가한 MCP 서버',kind:'remote-mcp',capabilities:[]});
+    }
+    return configureMcp(picked.id);
+  }
+  async function openMcpCatalogSite(){
+    const config=vscode.workspace.getConfiguration('schoolCode');
+    let raw=config.get('mcpCatalogUrl','');
+    if(!raw){
+      raw=await vscode.window.showInputBox({title:'MCP 카탈로그 사이트',prompt:'원클릭 MCP 설치를 제공하는 HTTPS 사이트 주소를 입력하세요. 주소는 설정에 저장됩니다.',placeHolder:'https://example.com/mcp/catalog',ignoreFocusOut:true});
+      if(!raw)return;
+      const normalized=safeRemoteUrl(raw);if(typeof config.update==='function')await config.update('mcpCatalogUrl',normalized,vscode.ConfigurationTarget?.Global??true);raw=normalized;
+    } else raw=safeRemoteUrl(raw);
+    await vscode.env.openExternal(vscode.Uri.parse(raw));
+  }
+  async function toggleMcp(id,enabled){mcpRegistry.setEnabled(id,enabled);await mcpRegistry.save();snapshot();}
+  async function removeMcp(id){
+    const item=mcpRegistry.get(id);if(!item)return;
+    if(item.catalogId==='school-workspace')return disconnectRelay();
+    if(item.catalogId==='notion')return disconnectNotion();
+    if(item.catalogId==='unity-editor'){await context.secrets.delete('schoolCode.unity.editorToken');mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;}
+    if(item.catalogId==='unity-cli'){
+      const config=vscode.workspace.getConfiguration('schoolCode');
+      if(typeof config.update==='function')await config.update('unityExecutable','',vscode.ConfigurationTarget?.Global??true);
+      mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;
+    }
+    if(await vscode.window.showWarningMessage(`${item.name} 연결 정보를 삭제할까요?`,{modal:true},'삭제')!=='삭제')return;
+    await context.secrets.delete(`schoolCode.mcp.token.${item.id}`);mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();
+  }
+  async function hydrateMcpRegistry(){
+    let changed=false;
+    if(await context.secrets.get('schoolCode.notion.integrationToken')&&!mcpRegistry.get('notion')){mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});changed=true;}
+    if(await context.secrets.get('schoolCode.unity.editorToken')&&!mcpRegistry.get('unity-editor')){mcpRegistry.upsert({id:'unity-editor',catalogId:'unity-editor',name:'Unity Editor MCP',description:'실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',kind:'local-mcp',enabled:true,capabilities:['unity','scene']});changed=true;}
+    if(vscode.workspace.getConfiguration('schoolCode').get('unityExecutable','')&&!mcpRegistry.get('unity-cli')){mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});changed=true;}
+    if(changed){await mcpRegistry.save();snapshot();}
   }
   async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50');agents=[...new Map([...(own.items||[]),...(pub.items||[])].map(a=>[a.id,{id:a.id,name:a.name}])).values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
   async function send(data){if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
@@ -146,13 +233,16 @@ function activate(context){
     return await vscode.window.showWarningMessage(detail,{modal:true},'승인')==='승인';
   }
   async function executeTool(job,isActive,ensureActive){
-    if(!vscode.workspace.isTrusted||!relayRoot||!isActive())throw Error('작업 영역 연결이 종료되었습니다.');const root=relayRoot,args=job.args||{};
+    if(!vscode.workspace.isTrusted||!relayRoot||!isActive())throw Error('작업 영역 연결이 종료되었습니다.');
+    const workspaceConnection=mcpRegistry.get('school-workspace');if(workspaceConnection?.enabled===false)throw Error('학교 Workspace MCP가 꺼져 있습니다. 패널에서 다시 켜세요.');
+    const root=relayRoot,args=job.args||{};
     const notionTool=job.name.startsWith('notion_');
     if(job.name==='workspace_info'){
       const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
-      return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:!!vscode.workspace.getConfiguration('schoolCode').get('unityExecutable',''),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+      return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken')),unity_executable_configured:!!vscode.workspace.getConfiguration('schoolCode').get('unityExecutable',''),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,shell_timeout_ms:90000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
+      if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
       if(!await approval(`학교 AI가 Notion 읽기 도구 ${job.name}을 요청했습니다. 공유된 페이지 내용이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
       await ensureActive();
       if(job.name==='notion_search')return notion.search(args);
@@ -177,6 +267,7 @@ function activate(context){
     }
     const unityTool=['unity_project_info','unity_run_tests','unity_build','unity_refresh_assets'].includes(job.name);
     if(unityTool){
+      if(mcpRegistry.get('unity-cli')?.enabled===false)throw Error('Unity CLI MCP가 꺼져 있습니다.');
       const write=job.name==='unity_build'||job.name==='unity_refresh_assets';
       if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트에서 Unity 도구 ${job.name}을 실행하려 합니다.${write?' 프로젝트 파일이나 빌드 산출물이 바뀔 수 있습니다.':''}`,{write}))throw Error('사용자가 거절했습니다.');
       await ensureActive();
@@ -192,6 +283,7 @@ function activate(context){
     }
     const unityEditorTool=job.name.startsWith('unity_')&&['unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene'].includes(job.name);
     if(unityEditorTool){
+      if(mcpRegistry.get('unity-editor')?.enabled===false)throw Error('Unity Editor MCP가 꺼져 있습니다.');
       const write=['unity_set_component','unity_create_gameobject','unity_save_scene'].includes(job.name);
       if(!await approval(`학교 AI가 연결된 Unity Editor에서 ${job.name}을 실행하려 합니다.${write?' 씬이나 오브젝트가 변경될 수 있습니다.':''}`,{write}))throw Error('사용자가 거절했습니다.');
       await ensureActive();return unityEditor.call(job.name,args);
@@ -248,7 +340,7 @@ function activate(context){
     await context.secrets.store(key,token);relayRoot=project.path;const ctl=relayController=new AbortController();const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','X-Worker-Id':randomUUID()};relaySession={url,headers};
     const call=async(route,body,timeout=30000)=>{const r=await fetch(url+route,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.any([ctl.signal,AbortSignal.timeout(timeout)])});if(!r.ok)throw Error(`중계 HTTP ${r.status}`);return r.json();};
     let heartbeatBusy=false;const heartbeat=setInterval(async()=>{if(heartbeatBusy||ctl.signal.aborted)return;heartbeatBusy=true;try{await call('/worker/heartbeat');relayConnected=true;}catch{relayConnected=false;}finally{heartbeatBusy=false;snapshot();}},10000);
-    (async()=>{try{await call('/worker/heartbeat');relayConnected=true;snapshot();while(!ctl.signal.aborted){try{const job=await call('/worker/poll');relayConnected=true;snapshot();if(!job.id)continue;let result,error;
+    (async()=>{try{await call('/worker/heartbeat');relayConnected=true;mcpRegistry.upsert({id:'school-workspace',catalogId:'school-workspace',name:'학교 Workspace',description:'현재 프로젝트 Workspace Relay',kind:'relay',url,enabled:true,capabilities:['workspace','shell','unity']});await mcpRegistry.save();snapshot();while(!ctl.signal.aborted){try{const job=await call('/worker/poll');relayConnected=true;snapshot();if(!job.id)continue;let result,error;
       const deadline=Math.min(Date.now()+115000,Number(job.expiresAt)||0);let active=true;const check=()=>active&&!ctl.signal.aborted&&Date.now()<deadline;
       const ensureActive=async()=>{if(!check())throw Error('요청 만료 — 변경하지 않았습니다.');const remote=await call('/worker/status',{id:job.id});if(!remote.active||!check())throw Error('중계 요청 만료');};
       const expiry=setTimeout(()=>active=false,Math.max(0,deadline-Date.now()));
@@ -262,6 +354,11 @@ function activate(context){
     if(m.type==='connect')return await connectBrowser();
     if(m.type==='connectorFolder')return await vscode.commands.executeCommand('revealFileInOS',vscode.Uri.joinPath(context.extensionUri,'chrome-extension','manifest.json'));
     if(m.type==='refresh')return await refresh();
+    if(m.type==='mcpAdd'||m.type==='mcpCatalog')return await chooseMcp();
+    if(m.type==='mcpSite')return await openMcpCatalogSite();
+    if(m.type==='mcpConfigure')return await configureMcp(String(m.id||''));
+    if(m.type==='mcpToggle')return await toggleMcp(String(m.id||''),m.enabled===true);
+    if(m.type==='mcpRemove')return await removeMcp(String(m.id||''));
     if(m.type==='notionConfigure')return await configureNotion();
     if(m.type==='notionDisconnect')return await disconnectNotion();
     if(m.type==='unityConfigure')return await configureUnity();
@@ -280,7 +377,8 @@ function activate(context){
     if(m.type==='disconnectRelay')return await disconnectRelay();
   }catch(e){post({type:'notice',text:e.message});vscode.window.showErrorMessage('School Code: '+e.message);}}
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
-  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
+  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
   const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();void disconnectRelay();void taskManager.dispose();}});
+  void hydrateMcpRegistry();
 }
 module.exports={activate};

@@ -1,4 +1,4 @@
-# KOREATECH School Code — 0.7.1 preview
+# KOREATECH School Code — 0.8.0 preview
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
@@ -6,7 +6,7 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.7.1.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.8.0.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -44,6 +44,14 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 프로젝트를 바꾸면 기존 첨부 목록을 비우고 외부 MCP 연결도 해제합니다. MCP를 다시 연결할 때도 이 패널에 선택된 프로젝트가 대상이 됩니다. 기존 채팅은 유지되므로 다른 프로젝트 이야기를 새로 시작하려면 **＋ 새 대화**를 사용하세요.
 
 이 파일 첨부 기능에는 학교 MCP 등록이나 중계 서버가 필요하지 않습니다. 학교 AI가 스스로 파일을 검색하고 수정하도록 하려면 아래 외부 MCP 연결과 MCP가 연결된 학교 에이전트를 사용합니다.
+
+## MCP 카탈로그와 연결 관리
+
+패널의 **MCP 카탈로그**에서 학교 Workspace, Notion, Unity CLI, Unity Editor MCP, Blender MCP, Unreal MCP를 한 곳에서 확인하고 연결·해제할 수 있습니다. 카탈로그의 **사이트** 버튼은 `schoolCode.mcpCatalogUrl`에 지정한 학교/개인 카탈로그를 열고, 주소를 아직 지정하지 않았다면 최초 한 번 입력받아 전역 설정에 저장합니다. HTTPS만 허용하며 로컬 개발 주소는 `localhost`·`127.0.0.1`만 HTTP를 사용할 수 있습니다.
+
+Blender·Unreal처럼 별도 서버를 쓰는 항목은 주소와 Bearer 토큰을 입력하면 연결 정보와 토큰이 저장됩니다. 주소·기능 목록은 VS Code의 로컬 상태에, 토큰은 SecretStorage에만 저장됩니다. 이 확장은 임의의 외부 MCP를 학교 AI의 에이전트에 자동 등록하거나 서버 도구를 대신 실행하지 않습니다. 학교 **리소스 → MCP**에서 서버를 등록하고 해당 서버가 연결된 에이전트를 선택해야 실제 대화에서 도구가 호출됩니다. 카탈로그는 이 과정을 한 곳에서 관리하기 위한 클라이언트 설정 화면입니다.
+
+연결 항목의 **끄기**는 로컬 사용 여부만 끄고 저장된 주소·토큰은 유지합니다. **해제**는 해당 연결의 저장 정보와 SecretStorage 토큰을 삭제합니다. 학교 Workspace를 해제하면 현재 프로젝트에 대한 릴레이 폴링도 중단됩니다.
 
 ## 외부 MCP 연결
 
