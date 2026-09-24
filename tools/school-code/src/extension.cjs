@@ -495,7 +495,7 @@ function activate(context){
       const statusResponse=await fetch(`${url}/auth/pair/status?pair_id=${encodeURIComponent(pair.pairId)}&secret=${encodeURIComponent(pair.pairSecret)}`,{redirect:'error',signal:AbortSignal.timeout(15000)});
       if(!statusResponse.ok)throw Error(`페어링 상태 확인 실패 (HTTP ${statusResponse.status})`);const status=await statusResponse.json();
       if(status.status!==lastStatus){lastStatus=status.status;output.appendLine(`페어링 상태: ${status.status}`);}
-      if(status.status==='approved'&&status.workerToken){await context.secrets.store(workerKey,status.workerToken);if(status.mcpToken)await context.secrets.store(mcpKey,status.mcpToken);output.appendLine('개인 Workspace·MCP Bearer 토큰을 SecretStorage에 저장했습니다.');return {workerToken:status.workerToken,mcpToken:status.mcpToken||''};}
+      if(status.status==='approved'){if(!status.workerToken)throw Error('서버는 연결을 승인했지만 Bearer 토큰을 전달하지 않았습니다. Workspace 연결 해제 후 토큰 재발급으로 다시 시도하세요.');await context.secrets.store(workerKey,status.workerToken);if(status.mcpToken)await context.secrets.store(mcpKey,status.mcpToken);output.appendLine('개인 Workspace·MCP Bearer 토큰을 SecretStorage에 저장했습니다.');return {workerToken:status.workerToken,mcpToken:status.mcpToken||''};}
       if(status.status==='expired'||status.status==='invalid')throw Error('페어링 코드가 만료되었습니다. 다시 연결하세요.');
       await new Promise(resolve=>setTimeout(resolve,1500));
     }
