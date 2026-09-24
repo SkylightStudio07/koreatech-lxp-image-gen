@@ -6,6 +6,12 @@ services:
     restart: unless-stopped
     env_file:
       - ../.local/relay.env
+    environment:
+      AUTH_STORE_PATH: /data/auth.json
+      # 역방향 프록시의 외부 HTTPS 주소로 바꾸세요.
+      PUBLIC_URL: ${PUBLIC_URL:-https://bcsd-nai.mywire.org:3010}
+    volumes:
+      - ../.local/auth-data:/data
     ports:
       - "127.0.0.1:18880:18880"
     read_only: true

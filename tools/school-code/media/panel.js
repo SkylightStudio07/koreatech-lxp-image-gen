@@ -11,7 +11,7 @@ const MAX_UPLOADS = 5;
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_UPLOAD_TOTAL = 64 * 1024 * 1024;
 
-for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'new', 'sessionNew', 'sessionRename', 'selection', 'relay', 'disconnectRelay', 'stop']) {
+for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'copyMcpAuth', 'new', 'sessionNew', 'sessionRename', 'selection', 'relay', 'disconnectRelay', 'stop']) {
   $(type).addEventListener('click', () => vscode.postMessage({ type: type === 'new' ? 'sessionNew' : type }));
 }
 

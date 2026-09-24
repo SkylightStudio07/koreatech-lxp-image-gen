@@ -2,7 +2,7 @@
 
 이 문서는 BCSD 구성원이 Windows에서 **KOREATECH School Code VS Code 확장**을 설치하고, 운영 중인 `bcsd-nai` MCP 중계 서버를 학교 AI에 등록하는 전체 절차를 정리한 문서입니다. 설치만 하면 학교 AI 채팅을 VS Code에서 사용할 수 있고, MCP까지 연결하면 선택한 프로젝트의 파일·셸·Unity 도구를 학교 에이전트가 호출할 수 있습니다.
 
-이 문서에서 말하는 서버 주소는 현재 BCSD 서버 기준입니다.
+이 문서에서 말하는 서버 주소는 현재 BCSD 서버 기준입니다. 0.10.0부터는 구성원이 정적 토큰을 복사하지 않고 BCSD 계정으로 브라우저 승인하는 개인 페어링 방식이 권장됩니다.
 
 | 용도 | 주소 |
 |---|---|
@@ -26,14 +26,14 @@ VS Code 안에 채팅 화면과 프로젝트 도구를 설치하는 확장입니
 
 `/mcp`에 등록하는 외부 MCP 서버입니다. 학교 에이전트가 `read_file`, `search_text`, `propose_edit`, Unity 도구 등을 호출하면 중계 서버가 현재 연결된 VS Code 워커로 작업을 전달합니다.
 
-### 두 토큰
+### 토큰과 계정 페어링
 
 | 이름 | 어디에 입력하는가 | 의미 |
 |---|---|---|
 | `MCP_TOKEN` | 학교 AI의 **리소스 → MCP** 등록 화면 | 학교 에이전트가 `/mcp`에 접속할 때 쓰는 Bearer 토큰 |
 | `WORKER_TOKEN` | VS Code School Code의 **학교 Workspace 연결** 화면 | VS Code 워커가 `/worker/*`에 접속할 때 쓰는 Bearer 토큰 |
 
-두 토큰은 반드시 서로 달라야 합니다. `MCP_TOKEN`을 VS Code 입력창에 넣거나 `WORKER_TOKEN`을 학교 MCP 인증 JSON에 넣으면 각각 `401`, `연결 안 됨`, `도구 목록 없음` 같은 오류가 납니다.
+기존 정적 토큰 모드에서는 두 토큰이 반드시 서로 달라야 합니다. 새 페어링 모드에서는 VS Code가 로그인 승인 뒤 개인 `WORKER_TOKEN`과 `MCP_TOKEN`을 자동 발급받아 SecretStorage에 저장하므로 직접 복사할 필요가 없습니다. 토큰은 학교 로그인 쿠키와 별도이며, 사용자·기기·워크스페이스에 연결됩니다.
 
 ## 2. 준비물
 
@@ -41,9 +41,8 @@ VS Code 안에 채팅 화면과 프로젝트 도구를 설치하는 확장입니
 - VS Code 1.95 이상
 - Chrome
 - KOREATECH 학교 AI 계정
-- 운영자가 전달한 `MCP_TOKEN`
-- VS Code에서 프로젝트 도구까지 사용할 경우 운영자가 전달한 `WORKER_TOKEN`
-- 저장소의 `tools/school-code/school-code-0.9.6.vsix`
+- BCSD 릴레이에 등록된 계정(처음이면 브라우저에서 가입)
+- 저장소의 `tools/school-code/school-code-0.10.0.vsix`
 
 채팅만 사용할 사람은 MCP 토큰이나 Workspace 토큰 없이도 학교 브라우저 연결과 모델 대화까지 설정할 수 있습니다. 프로젝트 파일·Unity·셸 도구를 사용할 사람은 아래 절차를 끝까지 진행해야 합니다.
 
@@ -55,14 +54,14 @@ PowerShell에서 저장소 루트로 이동한 뒤 VSIX를 설치합니다.
 
 ```powershell
 cd G:\Koreatech-Codex\school-ai
-code --install-extension .\tools\school-code\school-code-0.9.6.vsix --force
+code --install-extension .\tools\school-code\school-code-0.10.0.vsix --force
 code --list-extensions --show-versions | Select-String koreatech-school-code
 ```
 
 정상 결과에는 다음과 비슷한 항목이 표시됩니다.
 
 ```text
-skylight-local.koreatech-school-code@0.9.6
+skylight-local.koreatech-school-code@0.10.0
 ```
 
 VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **Shell Command: Install 'code' command in PATH**를 실행하거나, VSIX 파일을 VS Code 창으로 끌어 놓아 설치합니다.
@@ -72,7 +71,7 @@ VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **
 1. VS Code를 엽니다.
 2. `Ctrl+Shift+P`를 누릅니다.
 3. **Extensions: Install from VSIX...**를 선택합니다.
-4. `tools/school-code/school-code-0.9.6.vsix`를 선택합니다.
+4. `tools/school-code/school-code-0.10.0.vsix`를 선택합니다.
 5. 설치가 끝나면 **Developer: Reload Window**를 실행합니다.
 
 설치 후 왼쪽 Activity Bar에서 `School Code` 아이콘을 선택하고 **학교 AI** 뷰를 엽니다. 아이콘이 보이지 않으면 명령 팔레트에서 **School Code: 채팅 열기**를 실행합니다.
@@ -120,7 +119,7 @@ VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **
 
    주소 끝에 `/health`나 `/mcp`를 붙이지 않습니다. `/health`는 상태 확인용이고 `/mcp`는 학교 리소스 등록용입니다.
 
-8. `WORKER_TOKEN` 입력창에 운영자가 개인적으로 전달한 워커 토큰을 붙여 넣습니다.
+8. 인증 방식에서 **BCSD 계정으로 브라우저 승인**을 선택합니다. 브라우저에서 로그인·가입 후 **이 기기를 연결**을 누르면 확장이 개인 토큰을 자동 저장합니다. 구버전 릴레이를 쓰는 경우에만 **수동 WORKER_TOKEN 입력**을 선택합니다.
 9. VS Code 승인 창이 나오면 연결을 승인합니다.
 
 정상 상태는 다음과 같습니다.
@@ -130,7 +129,7 @@ VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **
 - 프로젝트 카드의 도구 상태: `MCP 프로젝트 도구 사용 가능`
 - 채팅 탭 상단의 상태: `학교 브라우저 연결됨`
 
-Workspace 연결은 현재 **중계 서버 한 인스턴스당 VS Code 워커 한 개**만 지원합니다. 이미 다른 사람이 같은 서버에 연결한 상태라면 두 번째 사용자는 `409 Another VS Code window is connected`를 받습니다. 여러 명이 동시에 자신의 프로젝트를 연결해야 한다면 운영자가 사용자별 릴레이 인스턴스·도메인·토큰을 따로 제공해야 합니다.
+페어링 모드에서는 사용자·기기·워크스페이스별 워커를 분리합니다. 같은 계정·워크스페이스에서 두 번째 VS Code 창이 연결되면 기존 워커를 보호하기 위해 `409`가 반환됩니다. 정적 토큰 모드의 구버전 릴레이는 여전히 한 인스턴스당 워커 한 개이므로, 구성원별 페어링을 쓰려면 릴레이를 0.10.0으로 업데이트해야 합니다.
 
 ## 7. 학교 AI에 BCSD MCP 등록
 
@@ -148,18 +147,18 @@ Workspace 연결은 현재 **중계 서버 한 인스턴스당 VS Code 워커 �
 | 전송 방식 | `HTTP` 또는 `Streamable HTTP` |
 | 서버 URL | `https://bcsd-nai.mywire.org:3010/mcp` |
 | 인증 방식 | `Bearer` |
-| 토큰 | 운영자가 전달한 `MCP_TOKEN` |
+| 토큰 | 페어링 후 VS Code **MCP 인증 JSON 복사**로 복사한 개인 `MCP_TOKEN` (구형 서버는 운영자가 전달한 토큰) |
 
-이 서버는 SSE 전용 주소가 아닙니다. 전송 방식에서 `SSE`만 선택하면 연결되지 않을 수 있습니다. 학교 화면이 인증 JSON을 요구하면 다음 형식으로 입력합니다.
+이 서버는 SSE 전용 주소가 아닙니다. 전송 방식에서 `SSE`만 선택하면 연결되지 않을 수 있습니다. 페어링을 마친 뒤 VS Code 설정에서 **MCP 인증 JSON 복사**를 누르고, 학교 화면이 인증 JSON을 요구하면 클립보드 내용을 그대로 붙여 넣습니다. 정적 토큰 모드의 운영자는 기존 `MCP_TOKEN`을 사용합니다.
 
 ```json
-{"type":"bearer","token":"운영자가_전달한_MCP_TOKEN"}
+{"type":"bearer","token":"페어링으로_발급된_개인_MCP_TOKEN"}
 ```
 
 화면이 헤더 직접 입력을 요구하면 다음 헤더를 사용합니다.
 
 ```text
-Authorization: Bearer 운영자가_전달한_MCP_TOKEN
+Authorization: Bearer 페어링으로_발급된_개인_MCP_TOKEN
 ```
 
 실제 토큰은 이 문서, GitHub, Discord/Slack 공개 채널, 스크린샷에 넣지 않습니다. 등록 후 **저장 → 연결 확인 → 도구 목록 새로고침**을 실행합니다.
@@ -246,7 +245,7 @@ $health.ok
 
 ## 12. 운영자용 배포 확인
 
-서버를 직접 운영하는 경우 릴레이는 서로 다른 두 토큰으로 시작해야 합니다.
+서버를 직접 운영하는 경우 0.10.0 릴레이는 계정 페어링을 기본으로 사용합니다. 기존 클라이언트 호환을 위해 두 정적 토큰을 함께 둘 수 있지만, 구성원에게 직접 전달하지 않는 편이 안전합니다.
 
 ```powershell
 cd tools/school-code
@@ -254,11 +253,22 @@ npm ci
 npm run keys
 ```
 
-`npm run keys`는 `.local/relay.env`에 서로 다른 `MCP_TOKEN`과 `WORKER_TOKEN`을 생성합니다. 이 파일은 Git에 추가하지 않습니다. Docker나 NAS 서비스에는 두 값을 환경 변수로 주입합니다.
+`npm run keys`는 `.local/relay.env`에 서로 다른 `MCP_TOKEN`과 `WORKER_TOKEN`을 생성합니다. 이 파일은 Git에 추가하지 않습니다. Docker나 NAS 서비스에는 두 값을 환경 변수로 주입합니다. 페어링 계정을 활성화하려면 다음 값도 설정합니다.
+
+```dotenv
+AUTH_STORE_PATH=/data/auth.json
+PUBLIC_URL=https://bcsd-nai.mywire.org:3010
+ALLOW_REGISTRATION=true
+# 선택: 초대 코드가 필요할 때 설정하고 ALLOW_REGISTRATION=false로 변경
+REGISTRATION_CODE=동아리-초대코드
+```
+
+Docker Compose를 쓰면 `/data`를 NAS의 별도 쓰기 가능한 `auth-data` 폴더에 마운트합니다. 이 파일에는 비밀번호·토큰 원문이 아니라 해시만 저장되지만, 계정 복구와 페어링 발급에 필요한 인증 저장소이므로 공개 공유하지 않습니다.
 
 역방향 프록시는 다음 경로를 같은 릴레이로 전달해야 합니다.
 
 - `/health` → 상태 확인
+- `/auth/*` → 페어링 페이지, 로그인·가입·승인·상태 확인
 - `/mcp` → 학교 AI의 Streamable HTTP POST
 - `/worker/heartbeat`
 - `/worker/poll`
@@ -268,17 +278,17 @@ npm run keys
 
 프록시 설정에서 `Authorization`과 `X-Worker-Id` 헤더를 보존하고, `/worker/poll`과 `/mcp` 응답 타임아웃을 최소 150초 이상으로 설정합니다. TLS 인증서는 외부에서 신뢰할 수 있어야 하며, `/mcp`와 `/worker/*`의 경로를 임의로 `/api` 아래로 바꾸거나 Authorization 헤더를 제거하면 안 됩니다.
 
-운영자는 `MCP_TOKEN`을 권한이 있는 BCSD 구성원에게만 전달할 수 있습니다. 그러나 이 MCP가 Workspace 릴레이인 경우 연결된 VS Code 프로젝트의 파일 읽기·수정·셸·Unity 도구까지 요청할 수 있습니다. 공유 대상과 승인 모드를 먼저 정하고, 구성원이 동시에 사용할 필요가 있으면 구성원별 릴레이와 토큰을 사용합니다.
+운영자는 정적 `MCP_TOKEN`을 구성원에게 전달하는 대신 각 구성원이 페어링 후 VS Code의 **MCP 인증 JSON 복사**를 사용하도록 안내합니다. Workspace 릴레이는 연결된 VS Code 프로젝트의 파일 읽기·수정·셸·Unity 도구까지 요청할 수 있으므로, 학교 MCP 에이전트 연결 대상과 VS Code 승인 모드를 함께 관리합니다.
 
 ## 13. 최종 체크리스트
 
-- [ ] VS Code에 `skylight-local.koreatech-school-code@0.9.6`이 설치됨
+- [ ] VS Code에 `skylight-local.koreatech-school-code@0.10.0`이 설치됨
 - [ ] Chrome `chrome://extensions`에 KOREATECH School Code Connector가 로드됨
 - [ ] 로그인된 `https://ai.koreatech.ac.kr/AiCA/chat` 탭이 하나 열려 있음
 - [ ] VS Code 설정 탭에서 브라우저가 `연결됨`으로 표시됨
 - [ ] 모델·에이전트 목록을 새로고침함
 - [ ] 프로젝트 폴더를 연결함
-- [ ] Workspace를 사용할 경우 `https://bcsd-nai.mywire.org:3010`과 WORKER_TOKEN을 입력함
+- [ ] Workspace를 사용할 경우 `https://bcsd-nai.mywire.org:3010`에서 BCSD 계정 페어링을 완료함
 - [ ] 학교 AI 리소스에 `https://bcsd-nai.mywire.org:3010/mcp`를 등록함
 - [ ] 학교 MCP 인증에 MCP_TOKEN을 사용함
 - [ ] MCP를 사용할 에이전트에 연결함

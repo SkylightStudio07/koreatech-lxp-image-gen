@@ -15,3 +15,22 @@ const called=client.callTool({name:'read_file',arguments:{path:'hello.txt'}});co
 const timed=await client.callTool({name:'workspace_info',arguments:{}});assert(timed.isError);assert.match(timed.content[0].text,/timeout/);
 const expired=await fetch(base+'/worker/result',{method:'POST',headers,body:JSON.stringify({id:'unknown',result:{}})});assert.equal(expired.status,410);
 });
+
+test('pairing issues per-user tokens and keeps workspace jobs isolated',async t=>{
+  const app=createRelay({port:0,timeoutMs:250,pairingTtlMs:30000});const address=await app.listen();const base=`http://127.0.0.1:${address.port}`;t.after(()=>app.close());
+  async function pair(username,workspace){
+    const start=await fetch(base+'/auth/pair/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspaceId:workspace,workspaceName:workspace,deviceId:randomUUID()})});const pending=await start.json();
+    const register=await fetch(base+'/auth/register',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({code:pending.code,username,password:'password123'})});assert.equal(register.status,303);
+    const status=await (await fetch(`${base}/auth/pair/status?pair_id=${pending.pairId}&secret=${pending.pairSecret}`)).json();assert.equal(status.status,'approved');assert(status.workerToken&&status.mcpToken);return {...status,cookie:register.headers.get('set-cookie')};
+  }
+  const alice=await pair('alice','workspace-a'),bob=await pair('bob','workspace-b');
+  const aliceWorker={Authorization:'Bearer '+alice.workerToken,'X-Worker-Id':randomUUID(),'Content-Type':'application/json'},bobWorker={Authorization:'Bearer '+bob.workerToken,'X-Worker-Id':randomUUID(),'Content-Type':'application/json'};
+  assert.equal((await fetch(base+'/worker/heartbeat',{headers:aliceWorker})).status,200);assert.equal((await fetch(base+'/worker/heartbeat',{headers:bobWorker})).status,200);
+  const aliceClient=new Client({name:'alice',version:'1'}),bobClient=new Client({name:'bob',version:'1'});t.after(()=>aliceClient.close());t.after(()=>bobClient.close());
+  await aliceClient.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{requestInit:{headers:{Authorization:'Bearer '+alice.mcpToken}}}));await bobClient.connect(new StreamableHTTPClientTransport(new URL(base+'/mcp'),{requestInit:{headers:{Authorization:'Bearer '+bob.mcpToken}}}));
+  const aliceCall=aliceClient.callTool({name:'workspace_info',arguments:{}});const aliceJob=await (await fetch(base+'/worker/poll',{headers:aliceWorker})).json();assert.equal(aliceJob.name,'workspace_info');
+  const bobStatus=await (await fetch(base+'/worker/status',{method:'POST',headers:bobWorker,body:JSON.stringify({id:aliceJob.id})})).json();assert.equal(bobStatus.active,false);
+  await fetch(base+'/worker/result',{method:'POST',headers:aliceWorker,body:JSON.stringify({id:aliceJob.id,result:{name:'workspace-a'}})});assert.equal(JSON.parse((await aliceCall).content[0].text).name,'workspace-a');
+  const bobCall=await bobClient.callTool({name:'workspace_info',arguments:{}});assert(bobCall.isError);assert.match(bobCall.content[0].text,/timeout/);
+  assert.equal((await fetch(base+'/auth/tokens/revoke',{method:'POST',headers:{Cookie:alice.cookie}})).status,200);assert.equal((await fetch(base+'/worker/heartbeat',{headers:aliceWorker})).status,401);
+});
