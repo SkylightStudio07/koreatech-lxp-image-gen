@@ -481,17 +481,21 @@ function activate(context){
   async function pairRelay(url,project,{force=false}={}){
     const {workspaceId,workerKey,mcpKey}=relayPairKeys(url,project),savedWorker=await context.secrets.get(workerKey),savedMcp=await context.secrets.get(mcpKey);
     if(savedWorker&&!force)return {workerToken:savedWorker,mcpToken:savedMcp||''};
+    output.appendLine(`Workspace 페어링 시작: ${url} · ${project.name}`);post({type:'notice',text:'브라우저에서 BCSD 계정 승인을 기다리는 중입니다.'});
     const response=await fetch(url+'/auth/pair/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspaceId,workspaceName:project.name,deviceId:randomUUID()}),redirect:'error',signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw Error(`페어링 시작 실패 (HTTP ${response.status})`);const pair=await response.json();
     if(!pair.pairId||!pair.pairSecret||!pair.approvalUrl)throw Error('중계 서버가 올바른 페어링 정보를 반환하지 않았습니다.');
+    output.appendLine(`페어링 코드가 발급되었습니다. 브라우저 승인 대기 중 (10분 제한)`);
     if(vscode.env?.openExternal&&vscode.Uri?.parse)await vscode.env.openExternal(vscode.Uri.parse(pair.approvalUrl));
     try{if(vscode.env?.clipboard?.writeText)await vscode.env.clipboard.writeText(pair.code);}catch{/* Clipboard access is optional. */}
     await vscode.window.showInformationMessage(`브라우저에서 BCSD 계정으로 로그인하고 연결을 승인하세요. 코드 ${pair.code}를 클립보드에도 복사했습니다.`);
     const deadline=Date.now()+10*60*1000;
+    let lastStatus='';
     while(Date.now()<deadline){
       const statusResponse=await fetch(`${url}/auth/pair/status?pair_id=${encodeURIComponent(pair.pairId)}&secret=${encodeURIComponent(pair.pairSecret)}`,{redirect:'error',signal:AbortSignal.timeout(15000)});
       if(!statusResponse.ok)throw Error(`페어링 상태 확인 실패 (HTTP ${statusResponse.status})`);const status=await statusResponse.json();
-      if(status.status==='approved'&&status.workerToken){await context.secrets.store(workerKey,status.workerToken);if(status.mcpToken)await context.secrets.store(mcpKey,status.mcpToken);return {workerToken:status.workerToken,mcpToken:status.mcpToken||''};}
+      if(status.status!==lastStatus){lastStatus=status.status;output.appendLine(`페어링 상태: ${status.status}`);}
+      if(status.status==='approved'&&status.workerToken){await context.secrets.store(workerKey,status.workerToken);if(status.mcpToken)await context.secrets.store(mcpKey,status.mcpToken);output.appendLine('개인 Workspace·MCP Bearer 토큰을 SecretStorage에 저장했습니다.');return {workerToken:status.workerToken,mcpToken:status.mcpToken||''};}
       if(status.status==='expired'||status.status==='invalid')throw Error('페어링 코드가 만료되었습니다. 다시 연결하세요.');
       await new Promise(resolve=>setTimeout(resolve,1500));
     }
@@ -513,7 +517,7 @@ function activate(context){
     else if(!forcePair&&token&&token.length>=32){pairMode=false;}
     else if(pairMode){const selected=await vscode.window.showQuickPick([{label:'BCSD 계정으로 브라우저 승인',description:'로그인 후 개인 토큰을 자동 발급합니다.',value:'pair'},{label:'수동 WORKER_TOKEN 입력',description:'기존 공용 토큰 호환 모드',value:'manual'}],{title:'Workspace MCP 인증 방식',placeHolder:'권장: BCSD 계정으로 브라우저 승인',ignoreFocusOut:true});if(!selected)return;pairMode=selected.value==='pair';}
     if(!auto&&!await approval(`${project.name}을 ${url}에 연결합니다. 학교 AI가 파일 도구를 요청할 수 있으며, 읽기/검색/수정은 건별로 승인합니다.`))return;
-    if(pairMode){const credentials=await pairRelay(url,project,{force:forcePair});token=credentials.workerToken;mcpToken=credentials.mcpToken;}else if(!token){token=await vscode.window.showInputBox({title:'중계 서버 WORKER_TOKEN',password:true,value:'',ignoreFocusOut:true});if(!token)return;if(token.length<32)throw Error('32자 이상 토큰이 필요합니다.');}
+    if(pairMode){relayError='브라우저 승인 대기 중';snapshot();const credentials=await pairRelay(url,project,{force:forcePair});token=credentials.workerToken;mcpToken=credentials.mcpToken;}else if(!token){token=await vscode.window.showInputBox({title:'중계 서버 WORKER_TOKEN',password:true,value:'',ignoreFocusOut:true});if(!token)return;if(token.length<32)throw Error('32자 이상 토큰이 필요합니다.');}
     if(projectContext.project!==project)throw Error('프로젝트가 변경되었습니다. MCP를 다시 연결하세요.');
     await context.secrets.store(key,token);relayRoot=project.path;const ctl=relayController=new AbortController();const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','X-Worker-Id':randomUUID()};relaySession={url,headers};
     const call=async(route,body,timeout=30000)=>{const r=await fetch(url+route,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.any([ctl.signal,AbortSignal.timeout(timeout)])});if(!r.ok)throw Error(`중계 HTTP ${r.status}`);return r.json();};
@@ -557,7 +561,7 @@ function activate(context){
     if(m.type==='relayRepair')return await connectRelay({forcePair:true});
     if(m.type==='copyMcpAuth')return await copyMcpAuth();
     if(m.type==='disconnectRelay')return await disconnectRelay();
-  }catch(e){post({type:'notice',text:e.message});vscode.window.showErrorMessage('School Code: '+e.message);}}
+  }catch(e){const message=String(e?.message||e||'알 수 없는 오류').slice(0,300);output.appendLine(`오류: ${message}`);if(m?.type==='relay'||m?.type==='relayRepair'){relayConnected=false;relayError=message;snapshot();}post({type:'notice',text:message});vscode.window.showErrorMessage('School Code: '+message);}}
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
   for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.repairRelay':()=>connectRelay({forcePair:true}),'schoolCode.copyMcpAuth':copyMcpAuth,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
   const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();for(const c of uploadControllers.values())c.abort();uploadControllers.clear();void disconnectRelay();void taskManager.dispose();}});
