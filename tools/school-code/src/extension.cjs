@@ -1,6 +1,8 @@
 const vscode=require('vscode');
 const fs=require('node:fs/promises');
 const path=require('node:path');
+const os=require('node:os');
+const {spawn}=require('node:child_process');
 const {randomBytes,randomUUID}=require('node:crypto');
 const {BrowserBridge}=require('./bridge.cjs');
 const {chatBody,SSEParser}=require('./protocol.cjs');
@@ -21,7 +23,7 @@ function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
   const port=vscode.workspace.getConfiguration('schoolCode').get('bridgePort',18766);
   const bridge=new BrowserBridge(port);let bridgeError='';const ready=bridge.start().catch(e=>{bridgeError=e.code==='EADDRINUSE'?'브리지 포트가 사용 중입니다. 다른 VS Code 창을 닫거나 bridgePort를 변경하세요.':e.message;output.appendLine(bridgeError);});context.subscriptions.push({dispose:()=>bridge.dispose()});
-  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',projectBusy=false;
+  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',unityEditorConnected=false,projectBusy=false;
   const imagePreviews=new Map(),imageLoads=new Map();
   const projectContext=new ProjectContext(vscode,context.workspaceState);
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
@@ -50,7 +52,7 @@ function activate(context){
       if(item.id==='school-workspace'){configured=configured||relayConnected;status=relayConnected?'connected':relayError?'error':configured?'configured':'not-connected';}
       if(item.id==='notion'){configured=notionConfigured;status=configured?'configured':'not-configured';}
       if(item.id==='unity-cli'){configured=unityPathConfigured()||!!mcpRegistry.get('unity-cli');status=configured?'configured':'not-configured';}
-      if(item.id==='unity-editor'){configured=unityEditorConfigured;status=configured?'configured':'not-configured';}
+      if(item.id==='unity-editor'){configured=unityEditorConfigured;status=unityEditorConnected?'connected':configured?'configured':'not-configured';}
       return {...item,configured,status,error:item.id==='school-workspace'?relayError:''};
     });
   }
@@ -120,14 +122,60 @@ function activate(context){
     await context.globalState?.update?.('schoolCode.unityExecutable',executable.trim());mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});await mcpRegistry.save();snapshot();
     vscode.window.showInformationMessage('Unity CLI 경로를 저장했습니다.');
   }
+  async function writeUnityEditorToken(token){
+    const directory=path.join(os.homedir(),'.school-code');
+    await fs.mkdir(directory,{recursive:true});
+    await fs.writeFile(path.join(directory,'unity-editor-token'),token,{encoding:'utf8',mode:0o600});
+  }
+  async function installUnityEditorBridge(project){
+    const info=await unity.projectInfo(project.path);
+    if(!info.is_unity_project)throw Error('연결된 프로젝트가 Unity 프로젝트가 아닙니다. ProjectSettings/ProjectVersion.txt와 Assets 폴더를 확인하세요.');
+    const source=vscode.Uri.joinPath(context.extensionUri,'unity-editor','SchoolCodeMcpBridge.cs').fsPath;
+    const target=path.join(project.path,'Assets','Editor','SchoolCodeMcpBridge.cs');
+    const bundled=await fs.readFile(source,'utf8');
+    let existing='';try{existing=await fs.readFile(target,'utf8');}catch(e){if(e.code!=='ENOENT')throw e;}
+    if(existing&&existing!==bundled&&await vscode.window.showWarningMessage('기존 SchoolCodeMcpBridge.cs를 확장에 포함된 최신 브리지로 바꿀까요?',{modal:true},'교체')!=='교체')throw Error('Unity Editor 브리지 설치를 취소했습니다.');
+    await fs.mkdir(path.dirname(target),{recursive:true});
+    // Touch the file even when the contents are current so an already open
+    // Editor reloads the bridge and picks up a newly provisioned token.
+    await fs.writeFile(target,bundled,'utf8');
+    return target;
+  }
+  async function launchUnityEditor(project){
+    const executable=unityExecutable();
+    await new Promise((resolve,reject)=>{
+      let settled=false;
+      const child=spawn(executable,['-projectPath',project.path],{cwd:project.path,detached:true,stdio:'ignore',windowsHide:true});
+      child.once('spawn',()=>{if(settled)return;settled=true;child.unref();resolve();});
+      child.once('error',error=>{if(settled)return;settled=true;reject(error);});
+    });
+  }
+  async function waitForUnityEditor(timeoutMs=45000){
+    const deadline=Date.now()+timeoutMs;
+    while(Date.now()<deadline){
+      try{await unityEditor.call('unity_find_gameobjects',{query:''});return true;}catch{}
+      await new Promise(resolve=>setTimeout(resolve,1000));
+    }
+    return false;
+  }
   async function configureUnityEditor(){
-    const existing=await context.secrets.get('schoolCode.unity.editorToken');
-    const token=await vscode.window.showInputBox({title:'Unity Editor MCP 브리지 토큰',prompt:'Unity Editor 메뉴 School Code → MCP Bridge → Copy Token의 값을 입력하세요. 토큰은 VS Code SecretStorage에만 저장됩니다.',password:true,ignoreFocusOut:true,value:existing||''});
-    if(!token)return;
-    if(token.trim().length<20)throw Error('Unity Editor 브리지 토큰이 너무 짧습니다.');
-    await context.secrets.store('schoolCode.unity.editorToken',token.trim());
-    try{await unityEditor.call('unity_find_gameobjects',{query:''});mcpRegistry.upsert({id:'unity-editor',catalogId:'unity-editor',name:'Unity Editor MCP',description:'실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',kind:'local-mcp',enabled:true,capabilities:['unity','scene']});await mcpRegistry.save();vscode.window.showInformationMessage('Unity Editor 브리지 연결이 확인되었습니다.');snapshot();}
-    catch(e){await context.secrets.delete('schoolCode.unity.editorToken');throw e;}
+    const project=await projectContext.ensure();
+    if(!await approval(`${project.name}의 Assets/Editor에 School Code 브리지를 설치하고 Unity Editor를 실행할까요? 브리지 파일은 프로젝트에 추가되고 로컬 토큰은 VS Code SecretStorage와 사용자 폴더에 저장됩니다.`,{write:true}))return;
+    await installUnityEditorBridge(project);
+    const key='schoolCode.unity.editorToken';
+    let token=await context.secrets.get(key);
+    if(!token){token=randomUUID().replaceAll('-','');await context.secrets.store(key,token);}
+    await writeUnityEditorToken(token);
+    let launched=false;
+    try{await unityEditor.call('unity_find_gameobjects',{query:''});unityEditorConnected=true;}
+    catch{
+      try{await launchUnityEditor(project);launched=true;}catch(e){output.appendLine(`Unity Editor 실행 실패: ${e.message}`);}
+      unityEditorConnected=await waitForUnityEditor();
+    }
+    mcpRegistry.upsert({id:'unity-editor',catalogId:'unity-editor',name:'Unity Editor MCP',description:'실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',kind:'local-mcp',enabled:true,capabilities:['unity','scene']});await mcpRegistry.save();snapshot();
+    if(unityEditorConnected)vscode.window.showInformationMessage('Unity Editor MCP 자동 연결이 완료되었습니다.');
+    else if(launched)vscode.window.showInformationMessage('Unity Editor를 실행했습니다. Unity 로그인과 프로젝트 로딩이 끝나면 MCP 카탈로그의 Unity Editor MCP를 다시 눌러 연결을 확인하세요.');
+    else vscode.window.showWarningMessage('브리지는 설치했지만 Unity Editor가 아직 응답하지 않습니다. Unity 로그인 후 프로젝트를 열고 다시 연결하세요.');
   }
   function safeRemoteUrl(raw){
     let u;try{u=new URL(String(raw||''));}catch{throw Error('MCP 주소가 올바른 URL이 아닙니다.');}
@@ -185,7 +233,7 @@ function activate(context){
     const item=mcpRegistry.get(id);if(!item)return;
     if(item.catalogId==='school-workspace')return disconnectRelay();
     if(item.catalogId==='notion')return disconnectNotion();
-    if(item.catalogId==='unity-editor'){await context.secrets.delete('schoolCode.unity.editorToken');mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;}
+    if(item.catalogId==='unity-editor'){await context.secrets.delete('schoolCode.unity.editorToken');unityEditorConnected=false;mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;}
     if(item.catalogId==='unity-cli'){
       await context.globalState?.update?.('schoolCode.unityExecutable',undefined);
       mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;
@@ -309,7 +357,7 @@ function activate(context){
       if(mcpRegistry.get('unity-editor')?.enabled===false)throw Error('Unity Editor MCP가 꺼져 있습니다.');
       const write=['unity_set_component','unity_create_gameobject','unity_save_scene'].includes(job.name);
       if(!await approval(`학교 AI가 연결된 Unity Editor에서 ${job.name}을 실행하려 합니다.${write?' 씬이나 오브젝트가 변경될 수 있습니다.':''}`,{write}))throw Error('사용자가 거절했습니다.');
-      await ensureActive();return unityEditor.call(job.name,args);
+      await ensureActive();const result=await unityEditor.call(job.name,args);unityEditorConnected=true;return result;
     }
     if(job.name==='read_skill'){
       if(!await approval(`학교 AI가 프로젝트 Skill ${args.name}을 읽으려 합니다. 프로젝트의 .school-code/skills 또는 .agents/skills 안의 지침이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');

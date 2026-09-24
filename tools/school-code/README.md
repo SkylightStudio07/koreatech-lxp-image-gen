@@ -1,4 +1,4 @@
-# KOREATECH School Code — 0.8.2 preview
+# KOREATECH School Code — 0.9.0 preview
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
@@ -6,7 +6,7 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.8.2.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.9.0.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -62,7 +62,7 @@ Blender·Unreal처럼 별도 서버를 쓰는 항목은 주소와 Bearer 토큰�
 | 학교 Workspace | **학교 Workspace → 연결** → 중계 서버 기본 주소와 `WORKER_TOKEN` 입력 | `연결됨`과 `도구별 승인` 표시 |
 | Notion | Notion Integration에 페이지를 공유한 뒤 **Notion → 연결** → Integration Secret 입력 | `설정됨` 표시. 학교 Workspace와 에이전트도 필요 |
 | Unity CLI | Unity 프로젝트를 선택하고 **Unity CLI → 연결** → `Unity.exe` 경로 입력 | `설정됨` 표시. Editor 브리지는 필요 없음 |
-| Unity Editor MCP | Unity 프로젝트에 브리지를 설치하고 Editor에서 Start → **Unity Editor MCP → 연결** → 토큰 입력 | `설정됨` 표시와 Editor 연결 확인 |
+| Unity Editor MCP | **Unity Editor MCP → 자동 준비** → Unity Editor 로그인/프로젝트 로딩 | `연결됨` 표시. 브리지 파일·토큰·Editor 실행을 자동 처리 |
 | Blender MCP | 실행 중인 HTTPS MCP의 주소(대개 `/mcp`)와 Bearer 토큰 입력 | `설정됨` 표시. 학교 리소스·에이전트 등록도 필요 |
 | Unreal MCP | 실행 중인 HTTPS MCP의 주소와 Bearer 토큰 입력 | `설정됨` 표시. 학교 리소스·에이전트 등록도 필요 |
 
@@ -84,9 +84,19 @@ Blender·Unreal MCP는 서버마다 인증·전송 방식이 다릅니다. 이 �
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.8.2.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.9.0.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
-Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것은 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
+Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 카탈로그의 버튼 이름도 `경로 설정`으로 표시됩니다. 이 단계는 `Unity.exe` 위치를 저장하는 것이며, 계속 실행 중인 MCP 서버를 만드는 과정이 아닙니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것도 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
+
+코덱스나 클로드에서 “Unity 연결 설정”만으로 씬까지 바로 다뤄지는 것은 보통 해당 환경에 Unity Editor MCP 패키지와 서버 등록이 이미 되어 있기 때문입니다. School Code도 이제 **Unity Editor MCP → 자동 준비** 한 번으로 `Assets/Editor/SchoolCodeMcpBridge.cs` 설치, 사용자별 토큰 생성, Unity Editor 실행, 로컬 브리지 확인까지 처리합니다. 처음 한 번은 Unity Hub/Editor 로그인이 필요할 수 있습니다. 따라서 다음처럼 구분하면 됩니다.
+
+| 하려는 일 | 필요한 연결 |
+|---|---|
+| 프로젝트 정보, EditMode/PlayMode 테스트, 배치 빌드, 에셋 새로 고침 | Unity CLI 경로 + 학교 Workspace MCP |
+| 열린 씬, GameObject, 컴포넌트 조회·수정 | Unity Editor MCP 브리지 + 학교 Workspace MCP |
+| Unity Skill 사용 | `.agents/skills` 또는 `.school-code/skills` 지침. 실행 연결을 대신 만들지는 않음 |
+
+두 Unity 연결 모두 학교 에이전트가 연결된 Workspace MCP를 통해 호출됩니다. Unity CLI만 `설정됨`이고 Editor 브리지가 `미설정`인 상태는 정상이며, CLI 작업만 가능한 상태입니다. Editor 작업을 요청하면 **자동 준비**가 브리지 설치·토큰 등록·Editor 실행까지 처리하고, Unity 로그인과 프로젝트 로딩만 기다리면 됩니다.
 
 ## 외부 MCP 연결
 
@@ -202,7 +212,7 @@ Unity 공식 Skill이 요구하는 일반 CLI 작업은 아래 셸 하네스를 
 
 ### Unity Editor 실시간 브리지
 
-`unity-editor/SchoolCodeMcpBridge.cs`를 Unity 프로젝트의 `Assets/Editor/`에 복사한 뒤 Unity 메뉴에서 **School Code → MCP Bridge → Start**를 실행합니다. **Copy Token**으로 토큰을 복사하고 VS Code의 **School Code: Unity Editor 연결 설정**에 입력하세요. 기본 loopback 포트는 `127.0.0.1:18777`이며 `schoolCode.unityEditorPort`와 Unity EditorPrefs 포트를 맞춰야 합니다.
+일반적으로는 **Unity Editor MCP → 자동 준비**를 누릅니다. 확장이 `Assets/Editor/SchoolCodeMcpBridge.cs`를 설치하고 사용자별 토큰을 만든 뒤 설정된 Unity 실행 파일로 프로젝트를 엽니다. Unity Hub/Editor 로그인이 끝나고 프로젝트가 로드되면 브리지가 자동으로 시작됩니다. 기본 loopback 포트는 `127.0.0.1:18777`이며 `schoolCode.unityEditorPort`와 Unity EditorPrefs 포트를 맞춰야 합니다. 수동으로 설치할 때만 Unity 메뉴의 **School Code → MCP Bridge → Start/Copy Token**을 사용하세요.
 
 브리지 도구는 `unity_open_scene`, `unity_find_gameobjects`, `unity_get_component`, `unity_set_component`, `unity_create_gameobject`, `unity_save_scene`입니다. loopback과 Bearer 토큰을 사용하고 C#·셸 명령을 실행하지 않습니다. 씬/오브젝트를 바꾸는 세 도구는 쓰기 승인 대상입니다. 자세한 설치는 `unity-editor/README.md`를 참고하세요.
 

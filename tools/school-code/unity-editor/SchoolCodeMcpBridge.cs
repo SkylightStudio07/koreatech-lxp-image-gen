@@ -82,6 +82,30 @@ public static class SchoolCodeMcpBridge
         EditorApplication.update += Pump;
         AssemblyReloadEvents.beforeAssemblyReload += Stop;
         EditorApplication.quitting += Stop;
+        // Loading the bridge is enough to start it. The VS Code extension installs
+        // the file and places the per-user token before opening the project.
+        Start();
+    }
+
+    private static string TokenFilePath()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".school-code", "unity-editor-token");
+    }
+
+    private static string LoadToken()
+    {
+        try
+        {
+            var fileToken = File.ReadAllText(TokenFilePath()).Trim();
+            if (!string.IsNullOrEmpty(fileToken))
+            {
+                EditorPrefs.SetString(TokenKey, fileToken);
+                return fileToken;
+            }
+        }
+        catch { }
+        return EditorPrefs.GetString(TokenKey, "");
     }
 
     [MenuItem("School Code/MCP Bridge/Start")]
@@ -90,7 +114,7 @@ public static class SchoolCodeMcpBridge
         if (listener != null && listener.IsListening) return;
         port = EditorPrefs.GetInt(PortKey, DefaultPort);
         if (port < 1024 || port > 65535) port = DefaultPort;
-        token = EditorPrefs.GetString(TokenKey, "");
+        token = LoadToken();
         if (string.IsNullOrEmpty(token))
         {
             token = Guid.NewGuid().ToString("N");
