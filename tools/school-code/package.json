@@ -37,6 +37,10 @@
         "title": "School Code: 외부 MCP 중계 연결"
       },
       {
+        "command": "schoolCode.repairRelay",
+        "title": "School Code: BCSD 계정 재페어링"
+      },
+      {
         "command": "schoolCode.copyMcpAuth",
         "title": "School Code: 학교 MCP 인증 JSON 복사"
       },
