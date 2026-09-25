@@ -22,13 +22,20 @@ const STARTER_INSTRUCTIONS=`# Project Instructions
 
 This file was created automatically when School Code connected this project.
 
-- Inspect the project structure and existing documentation before making changes.
-- Prefer small, reviewable changes and explain what was changed and how it was checked.
-- Use the project's existing scripts, conventions, and dependencies where possible.
-- Ask before destructive, broad, or irreversible operations.
-- Keep secrets, credentials, generated output, and unrelated files out of changes.
+- Treat the files in this project as the source of truth. Do not invent classes, fields, methods, enum values, routes, or Unity APIs from memory.
+- For a change, first inspect the relevant directory, read the target file and its callers, and search for the symbols that the change uses.
+- Preserve the existing architecture, singleton contracts, serialized fields, UI flow, and unrelated behavior. Prefer a small patch over replacing an existing file.
+- Before applying a change, state the files and symbols you actually inspected, the intended change, and how it will be verified.
+- After a change, run the project's normal compile, test, or validation command. If it fails, inspect the real declarations and error locations before changing more code.
+- Ask before destructive, broad, or irreversible operations. Keep secrets, credentials, generated output, and unrelated files out of changes.
 - For Unity projects, preserve the project's Unity version and validate changes with the configured Unity tools.
 `;
+const HARNESS_INSTRUCTIONS=`[School Code 작업 규칙]
+이 요청은 실제 기존 프로젝트에서 수행됩니다. 프로젝트 파일과 도구 결과를 유일한 사실로 취급하세요.
+수정이 필요하면 먼저 workspace_info와 프로젝트 지침을 확인하고, 관련 디렉터리 목록·대상 파일·호출부·사용할 심볼을 조사하세요. 확인하지 못한 API, 필드, enum, 싱글턴을 추측해서 만들지 마세요.
+기존 파일은 필요한 부분만 바꾸고 전체 재작성하지 마세요. 수정안을 제시할 때 실제로 확인한 파일과 심볼, 변경 이유, 검증 방법을 함께 설명하세요.
+수정 후에는 프로젝트의 컴파일·테스트·검증 도구를 실행하세요. 오류가 나면 선언부와 호출부를 다시 읽은 뒤 수정하고, 검증하지 못했으면 성공했다고 말하지 마세요.
+읽기·검색은 필요한 만큼 자유롭게 진행하되, 파일 쓰기와 위험한 명령은 승인과 diff 검토를 거칩니다.`;
 
 function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
@@ -368,6 +375,7 @@ function activate(context){
     if(!state.goal?.text||state.goal.status==='completed')return '';
     return `\n\n[현재 작업 목표]\n${state.goal.text}\n이 목표를 기준으로 현재 요청을 처리하고, 목표 달성에 필요한 다음 작업과 검증 결과를 함께 제시하세요.`;
   }
+  function harnessPrompt(){return `\n\n${HARNESS_INSTRUCTIONS}`;}
   async function setGoal(text){
     const clean=String(text||'').trim().slice(0,1000);
     if(!clean)throw Error('작업 목표를 입력하세요.');
@@ -475,7 +483,7 @@ function activate(context){
     let message=String(data.message||'');if(!message.trim()&&uploaded.length)message='첨부한 파일을 확인하고 필요한 내용을 설명해 주세요.';if(!message.trim())throw Error('질문을 입력하거나 파일을 첨부하세요.');
     let compacted=null;
     if(state.contextCompaction&&!state.contextSummary){const limit=compactThreshold(state.compactionThreshold);if(estimateMessages([...state.messages,{role:'user',text:message}])>limit)compacted=compactMessages(state.messages,Math.max(16000,limit-message.length));if(compacted){state.messages=compacted.messages;state.contextSummary=compacted.summary;state.conversationId=null;post({type:'notice',text:`컨텍스트를 압축했습니다. 이전 메시지 ${compacted.removed}개를 요약하고 새 대화 맥락으로 이어갑니다.`});await save();snapshot();}}
-    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+goalPrompt()+message);const selectedAgent=data.agent?await resolveAgent(String(data.agent)):null;const workflow=Boolean(selectedAgent&&agentUsesWorkflow(selectedAgent));const body=workflow?null:chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId,fileIds:uploaded.map(a=>a.file_id),fileAttachments:uploaded},models);
+    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+goalPrompt()+harnessPrompt()+`\n\n[사용자 요청]\n${message}`);const selectedAgent=data.agent?await resolveAgent(String(data.agent)):null;const workflow=Boolean(selectedAgent&&agentUsesWorkflow(selectedAgent));const body=workflow?null:chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId,fileIds:uploaded.map(a=>a.file_id),fileAttachments:uploaded},models);
     const info=projectContext.info();
     state.model=data.model;state.agent=data.agent||'';state.mode=data.mode;if(state.title==='새 대화')state.title=message.replace(/\s+/g,' ').trim().slice(0,48)||'새 대화';state.messages.push({role:'user',text:message,attachments:uploaded,project:info.files.length?info.project?.name:undefined,contextFiles:info.files});projectContext.clear();const answer={role:'assistant',text:'',status:'응답 중'};state.messages.push(answer);
     controller=new AbortController();post({type:'accepted'});snapshot();void preloadAttachments(uploaded);let done=false;
@@ -517,12 +525,23 @@ function activate(context){
     const target=await workspace.safePath(root,relative,{create:true});let before=null;
     let exists=true;try{await fs.lstat(target);}catch(e){if(e.code==='ENOENT')exists=false;else throw e;}if(exists)before=await workspace.readText(root,relative);
     if(before&&args.expected_sha256!==before.hash)throw Error('read_file의 최신 sha256을 expected_sha256에 지정하세요.');
+    const beforeLines=before?.text.split(/\r?\n/)||[],afterLines=args.content.split(/\r?\n/);
+    let prefix=0;while(before&&prefix<beforeLines.length&&prefix<afterLines.length&&beforeLines[prefix]===afterLines[prefix])prefix++;
+    let suffix=0;while(before&&suffix<beforeLines.length-prefix&&suffix<afterLines.length-prefix&&beforeLines[beforeLines.length-1-suffix]===afterLines[afterLines.length-1-suffix])suffix++;
+    const changedBefore=before?beforeLines.length-prefix-suffix:0,changedAfter=before?afterLines.length-prefix-suffix:afterLines.length;
+    const totalChanged=changedBefore+changedAfter,totalLines=beforeLines.length+afterLines.length;
+    const broadChange=Boolean(before&&beforeLines.length>=20&&(totalChanged/Math.max(1,totalLines))>=0.65&&prefix+suffix<Math.max(4,Math.floor(beforeLines.length*0.2)));
+    const changeStats=`변경 범위: 기존 ${beforeLines.length||0}줄 → ${afterLines.length}줄, 대략 ${changedBefore}줄 삭제 · ${changedAfter}줄 추가`;
+    const summary=typeof args.change_summary==='string'&&args.change_summary.trim()?`\n변경 요약: ${args.change_summary.trim().slice(0,2000)}`:'';
+    const verification=typeof args.verification_plan==='string'&&args.verification_plan.trim()?`\n검증 계획: ${args.verification_plan.trim().slice(0,2000)}`:'';
+    const broadWarning=broadChange?'\n주의: 기존 파일의 넓은 범위가 바뀌었습니다. 전체 재작성이라면 기존 기능과 호출부를 다시 확인한 뒤 승인하세요.':'';
     const open=vscode.workspace.textDocuments.find(d=>d.uri.fsPath===target);if(open?.isDirty)throw Error('저장되지 않은 편집이 있습니다. 먼저 저장하세요.');
     const id=randomUUID(),left=vscode.Uri.parse(`school-code-preview:/${id}/before/${encodeURIComponent(relative)}`),right=vscode.Uri.parse(`school-code-preview:/${id}/after/${encodeURIComponent(relative)}`);
     previews.set(left.toString(),before?.text||'');previews.set(right.toString(),args.content);
     try{
       await vscode.commands.executeCommand('vscode.diff',left,right,`학교 AI 수정안: ${relative}`);
-      if(!await approval(`${detail}\ndiff를 확인한 뒤 ${relative} ${before?'수정':'생성'}을 승인하세요.`,{write:true}))throw Error('사용자가 수정을 거절했습니다.');
+      output.appendLine(`수정안: ${relative} · ${changeStats}${broadChange?' · broad-change warning':''}`);
+      if(!await approval(`${detail}${summary}${verification}\n${changeStats}${broadWarning}\ndiff를 확인한 뒤 ${relative} ${before?'수정':'생성'}을 승인하세요.`,{write:true}))throw Error('사용자가 수정을 거절했습니다.');
       await ensureActive();
       await workspace.safePath(root,relative,{create:!before});
       if(before){const latest=await workspace.readText(root,relative);if(latest.hash!==before.hash)throw Error('검토 중 파일이 변경되었습니다.');}
@@ -534,7 +553,7 @@ function activate(context){
       edit.replace(uri,doc?new vscode.Range(doc.positionAt(0),doc.positionAt(doc.getText().length)):new vscode.Range(0,0,0,0),args.content);
       if(!await vscode.workspace.applyEdit(edit))throw Error('수정 적용 실패');
       const changed=await vscode.workspace.openTextDocument(uri);await vscode.window.showTextDocument(changed);if(!await changed.save())throw Error('편집기에 적용했으나 저장 실패');
-      return {applied:true,path:relative,sha256:workspace.sha(Buffer.from(args.content))};
+      return {applied:true,path:relative,sha256:workspace.sha(Buffer.from(args.content)),change_summary:args.change_summary||null,verification_plan:args.verification_plan||null,change_stats:{before_lines:beforeLines.length,after_lines:afterLines.length,deleted_lines:changedBefore,added_lines:changedAfter,broad_change:broadChange}};
     }finally{previews.delete(left.toString());previews.delete(right.toString());}
   }
   async function ensureStarterInstructions(root,ensureActive){

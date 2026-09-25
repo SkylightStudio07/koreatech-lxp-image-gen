@@ -21,13 +21,13 @@ const vector3=z.object({x:z.number(),y:z.number(),z:z.number()});
 
 const toolDefinitions={
 
-  workspace_info:{description:'Get the connected VS Code project name, available tools, instruction files and safety limits. Requires a connected worker. When no recognized instruction file exists, the School Code extension automatically creates a starter root AGENTS.md without an approval prompt; it never overwrites an existing instruction file.',schema:{}},
+  workspace_info:{description:'Use this near the start of work on the connected VS Code project. It returns the project name, available tools, instruction files, Skills and safety limits. It does not replace inspecting the relevant files. Requires a connected worker. When no recognized instruction file exists, the School Code extension automatically creates a starter root AGENTS.md without an approval prompt; it never overwrites an existing instruction file.',schema:{}},
 
   create_directory:{description:'Create a relative folder inside the connected VS Code project after explicit approval. Existing folders are left unchanged; paths outside the project, hidden/secrets directories, links and dot-paths are rejected.',schema:{path:z.string().min(1).max(1024)}},
 
   list_files:{description:'List files inside the connected workspace (excludes secrets, Git metadata, dependencies).',schema:{path:z.string().default(''),limit:z.number().int().min(1).max(500).default(200)}},
 
-  read_file:{description:'Read a UTF-8 text file in the workspace after user approval.',schema:{path:z.string().min(1),start_line:z.number().int().min(1).default(1),end_line:z.number().int().min(1).default(300)}},
+  read_file:{description:'Read a UTF-8 text file in the workspace after user approval. For an existing file you plan to change, inspect the relevant ranges and use the returned SHA-256 in propose_edit. Preserve surrounding code and existing contracts.',schema:{path:z.string().min(1),start_line:z.number().int().min(1).default(1),end_line:z.number().int().min(1).default(300)}},
 
   search_text:{description:'Search literal text in workspace text files, after user approval.',schema:{query:z.string().min(1).max(200),path:z.string().default(''),limit:z.number().int().min(1).max(100).default(50)}},
 
@@ -115,7 +115,7 @@ const toolDefinitions={
 
   unity_set_animator_parameter:{description:'Set a runtime Animator parameter after approval.',schema:{game_object_id:z.string().min(1),name:z.string().min(1).max(200),parameter_type:z.enum(['float','int','bool','trigger']),value:z.string().max(200)}},
 
-  propose_edit:{description:'Propose complete UTF-8 file contents. Shows a VS Code diff and requires explicit user approval before writing. Existing file edits require the SHA-256 from read_file.',schema:{path:z.string().min(1),content:z.string().max(200000),expected_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}},
+  propose_edit:{description:'Propose a minimal, reviewable change to a UTF-8 file. The transport accepts complete resulting contents and shows a VS Code diff before explicit approval, so preserve all unrelated existing code and do not rewrite an existing file from memory. Existing file edits require the latest SHA-256 from read_file. Include a short change summary and verification plan when possible.',schema:{path:z.string().min(1),content:z.string().max(200000),expected_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional(),change_summary:z.string().max(2000).optional(),verification_plan:z.string().max(2000).optional()}},
 
 };
 
