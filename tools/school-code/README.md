@@ -1,8 +1,8 @@
-# KOREATECH School Code — 0.18.8
+# KOREATECH School Code — 0.18.9
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
-일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.18.8.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
+일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.18.9.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
 
 > **공유 전 확인:** 기존에 동아리에서 사용하던 학교 AI MCP 서버는 권한이 있는 구성원에게 URL과 등록 정보를 공유해도 됩니다. School Code Workspace 릴레이는 이제 BCSD 계정 페어링을 통해 사용자·워크스페이스별 토큰과 워커 연결을 분리합니다. 기존 정적 `MCP_TOKEN`, `WORKER_TOKEN`도 호환되지만 새 설치에서는 브라우저 승인 방식을 권장합니다. 토큰, Notion 토큰, Unity Editor 토큰은 공개 저장소나 단체 채팅에 올리지 마세요.
 
@@ -14,7 +14,7 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.18.8.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.18.9.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -37,6 +37,7 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 - 세션별 **컨텍스트 압축**을 선택할 수 있습니다. 켜면 약 3.2만·6만·9만자 기준을 넘을 때 오래된 대화를 로컬 요약으로 묶고 새 학교 대화 ID로 이어갑니다. 서버가 자동 압축을 지원하는지와 관계없이 이 세션에서만 확실하게 동작하며, 압축하지 않을 때는 기존 대화 ID를 그대로 유지합니다.
 - 도구 승인은 `매번 확인`, `읽기는 자동 승인 · 수정은 확인`, `모두 자동 승인` 중에서 세션별로 선택합니다. 기본값은 `매번 확인`이며, 자동 승인 모드에서도 프로젝트 루트·비밀 경로 제한은 유지됩니다.
 - 학교 Workspace 도구에는 `create_directory`가 포함됩니다. 상대 경로의 새 폴더와 중첩 폴더만 만들 수 있고, 프로젝트 밖 경로·숨김/비밀 경로·심볼릭 링크·기존 파일은 거부합니다. 폴더 생성은 파일 수정과 같은 쓰기 승인으로 처리됩니다.
+- `save_image_asset`은 학교 AI가 생성했거나 대화에 첨부한 이미지의 `file_id`를 연결된 프로젝트 안의 PNG/JPEG/WebP/GIF/SVG/ICO 파일로 저장합니다. 부모 폴더는 먼저 `create_directory`로 만들고, 저장·덮어쓰기 모두 승인 대상입니다. 이미지는 16 MiB 이하이며 SVG 안전성도 확인합니다.
 - 중단 시 브라우저가 진행 중인 요청을 취소합니다. 이미 학교 서버에서 처리된 이용량까지 취소되는 것은 아닙니다. 자동 재전송하지 않습니다.
 - 대화는 VS Code의 해당 작업 영역 로컬 상태에 최근 100개 메시지까지 저장됩니다.
 - 학교 AI가 이미지 생성 결과를 첨부하면 Chrome의 로그인 탭에서 `/chat/uploads/{file_id}`를 받아 대화 안에 PNG/JPEG/WebP/GIF/SVG 미리보기로 표시합니다. 이미지 본문은 세션 저장소에 저장하지 않고 현재 확장 실행 중인 메모리에만 보관합니다.
@@ -118,7 +119,7 @@ Blender·Unreal·Figma MCP는 서버마다 인증·전송 방식이 다릅니다
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.18.8.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.18.9.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
 Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 카탈로그의 버튼 이름도 `경로 설정`으로 표시됩니다. 이 단계는 `Unity.exe` 위치를 저장하는 것이며, 계속 실행 중인 MCP 서버를 만드는 과정이 아닙니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것도 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
 
@@ -308,6 +309,7 @@ npx skills add Unity-Technologies/skills
 - `read_asset_metadata`: 바이너리 내용을 전송하지 않고 크기·형식·수정 시각·SHA-256 확인
 - `list_visual_assets`: 프로젝트의 PNG/JPEG/GIF/WebP/SVG/ICO 목록과 크기·해시·Unity 텍스처 메타데이터 확인
 - `read_image`: 선택한 이미지 한 장을 MCP 이미지 콘텐츠로 전달해 에이전트가 실제 픽셀을 확인 (최대 16 MiB)
+- `save_image_asset`: 학교 AI 이미지 첨부를 연결된 프로젝트의 이미지 파일로 저장 (승인·형식·용량·SVG 안전성 확인)
 - `read_instructions`: `AGENTS.md`, `CODEX.md`, `CLAUDE.md` 등의 프로젝트 지침 읽기
 - `read_skill`: 프로젝트 `.school-code/skills` 또는 `.agents/skills` 지침 읽기 (`.school-code` 우선)
 - `run_shell`: 승인된 프로젝트 내부 셸 명령 실행

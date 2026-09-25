@@ -556,6 +556,30 @@ function activate(context){
       return {applied:true,path:relative,sha256:workspace.sha(Buffer.from(args.content)),change_summary:args.change_summary||null,verification_plan:args.verification_plan||null,change_stats:{before_lines:beforeLines.length,after_lines:afterLines.length,deleted_lines:changedBefore,added_lines:changedAfter,broad_change:broadChange}};
     }finally{previews.delete(left.toString());previews.delete(right.toString());}
   }
+  async function saveImageAsset(root,args,ensureActive){
+    const fileId=String(args.file_id||'');if(!/^[a-zA-Z0-9-]{1,200}$/.test(fileId))throw Error('이미지 첨부 ID가 올바르지 않습니다.');
+    const relative=String(args.path||'');const extension=path.extname(relative).toLowerCase();const allowed=new Set(['.png','.jpg','.jpeg','.webp','.gif','.svg','.ico']);
+    if(!allowed.has(extension))throw Error('이미지는 PNG, JPEG, WebP, GIF, SVG 또는 ICO 확장자로 저장하세요.');
+    const overwrite=args.overwrite===true;
+    if(!await approval(`학교 AI가 생성·첨부 이미지를 프로젝트에 저장하려 합니다.\n경로: ${relative}\n기존 파일 덮어쓰기: ${overwrite?'예':'아니요'}`,{write:true}))throw Error('사용자가 이미지 저장을 거절했습니다.');
+    await ensureActive();
+    const remote=await bridge.request(`/chat/uploads/${encodeURIComponent(fileId)}`,{binary:true});
+    const base64=String(remote?.base64||'');if(!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)||base64.length>23*1024*1024)throw Error('이미지 데이터가 올바르지 않거나 크기 제한을 초과했습니다.');
+    const buffer=Buffer.from(base64,'base64');if(buffer.length<=0||buffer.length>workspace.MAX_IMAGE_BYTES)throw Error(`이미지는 ${workspace.MAX_IMAGE_BYTES/(1024*1024)} MiB 이하만 저장할 수 있습니다.`);
+    const contentType=String(remote?.contentType||'').split(';',1)[0].toLowerCase();if(contentType&&!contentType.startsWith('image/'))throw Error('첨부 파일이 이미지가 아닙니다.');
+    const target=await workspace.safePath(root,relative,{create:true});let previous=null,exists=false;
+    try{previous=await fs.readFile(target);exists=true;}catch(e){if(e.code!=='ENOENT')throw e;}
+    if(exists&&!overwrite)throw Error('같은 경로의 이미지가 이미 있습니다. overwrite 승인을 명시하세요.');
+    await ensureActive();
+    try{
+      await fs.writeFile(target,buffer,{flag:overwrite?'w':'wx'});
+      const checked=await workspace.readImage(root,relative);
+      return {saved:true,path:relative,size:checked.size,mime:checked.mime,sha256:checked.sha256,width:checked.width,height:checked.height,overwritten:exists,source_file_id:fileId};
+    }catch(error){
+      try{if(previous)await fs.writeFile(target,previous,{flag:'w'});else await fs.unlink(target);}catch{/* Preserve the original error while attempting rollback. */}
+      throw error;
+    }
+  }
   async function ensureStarterInstructions(root,ensureActive){
     const existing=await workspace.readInstructions(root);if(existing.files.length)return {attempted:false,created:false};
     try{
@@ -580,7 +604,7 @@ function activate(context){
     if(job.name==='workspace_info'){
       const setup=await ensureStarterInstructions(root,ensureActive);const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
        const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
-       return {name:path.basename(root),tools:['create_directory','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,model_metadata_max_bytes:workspace.MAX_MODEL_METADATA_BYTES,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+       return {name:path.basename(root),tools:['create_directory','save_image_asset','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,model_metadata_max_bytes:workspace.MAX_MODEL_METADATA_BYTES,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000}};
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
@@ -611,6 +635,7 @@ function activate(context){
       if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트 안에 폴더를 생성하려 합니다.\n경로: ${relative}\n프로젝트 밖의 경로와 숨김·비밀 폴더는 허용되지 않습니다.`,{write:true}))throw Error('사용자가 거절했습니다.');
       await ensureActive();return workspace.createDirectory(root,relative);
     }
+    if(job.name==='save_image_asset')return saveImageAsset(root,args,ensureActive);
     const unityTool=['unity_project_info','unity_run_tests','unity_build','unity_refresh_assets'].includes(job.name);
     if(unityTool){
       if(mcpRegistry.get('unity-cli')?.enabled===false)throw Error('Unity CLI MCP가 꺼져 있습니다.');

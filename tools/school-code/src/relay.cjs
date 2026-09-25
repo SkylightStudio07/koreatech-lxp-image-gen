@@ -14,7 +14,7 @@ const {RelayAuthStore,encodeCookie,pairingPage}=require('./auth.cjs');
 
 
 
-const MUTATING_TOOLS=new Set(['create_directory','propose_edit','run_shell','start_background_task','task_cancel','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene','unity_play','unity_pause','unity_stop','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_set_animator_parameter']);
+const MUTATING_TOOLS=new Set(['create_directory','save_image_asset','propose_edit','run_shell','start_background_task','task_cancel','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene','unity_play','unity_pause','unity_stop','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_set_animator_parameter']);
 const vector3=z.object({x:z.number(),y:z.number(),z:z.number()});
 
 
@@ -24,6 +24,8 @@ const toolDefinitions={
   workspace_info:{description:'Use this near the start of work on the connected VS Code project. It returns the project name, available tools, instruction files, Skills and safety limits. It does not replace inspecting the relevant files. Requires a connected worker. When no recognized instruction file exists, the School Code extension automatically creates a starter root AGENTS.md without an approval prompt; it never overwrites an existing instruction file.',schema:{}},
 
   create_directory:{description:'Create a relative folder inside the connected VS Code project after explicit approval. Existing folders are left unchanged; paths outside the project, hidden/secrets directories, links and dot-paths are rejected.',schema:{path:z.string().min(1).max(1024)}},
+
+  save_image_asset:{description:'Save an image attachment returned by the school AI into a relative image path inside the connected VS Code project after explicit approval. Use create_directory first when the parent folder does not exist. Supported formats are PNG, JPEG, WebP, GIF, SVG and ICO; the image is validated before it is kept and existing files are not overwritten unless overwrite is true.',schema:{file_id:z.string().regex(/^[a-zA-Z0-9-]{1,200}$/),path:z.string().min(1).max(1024),overwrite:z.boolean().default(false)}},
 
   list_files:{description:'List files inside the connected workspace (excludes secrets, Git metadata, dependencies).',schema:{path:z.string().default(''),limit:z.number().int().min(1).max(500).default(200)}},
 
@@ -144,7 +146,7 @@ function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs
     return new Promise((resolve,reject)=>{const id=randomUUID();let settled=false;const cleanup=()=>{clearTimeout(timer);jobs.delete(id);signal?.removeEventListener('abort',abort);};const finish=(error,result)=>{if(settled)return;settled=true;cleanup();error?reject(error):resolve(result);};const abort=()=>finish(Error('Request cancelled'));const timer=setTimeout(()=>finish(Error('Approval/tool timeout. No automatic retry.')),timeoutMs);jobs.set(id,{id,name,args,ownerKey:key,expiresAt:Date.now()+timeoutMs,resolve:r=>finish(null,r),reject:e=>finish(e),timer,delivered:false});signal?.addEventListener('abort',abort,{once:true});dispatch(worker);});}
 
   function mcpContent(name,result){if(!result||typeof result!=='object')return [{type:'text',text:JSON.stringify(result)}];const imageData=typeof result.data==='string'&&name==='read_image'?result.data:typeof result.image_base64==='string'?result.image_base64:null;if(!imageData)return [{type:'text',text:JSON.stringify(result)}];const metadata={...result};delete metadata.data;delete metadata.image_base64;return [{type:'text',text:JSON.stringify(metadata)},{type:'image',data:imageData,mimeType:String(result.mime||result.mime_type||'image/png')}];}
-  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.18.8'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:mcpContent(name,await enqueue(name,args,extra.signal,identity))};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
+  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.18.9'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:mcpContent(name,await enqueue(name,args,extra.signal,identity))};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
 
   function requestBase(req){if(publicUrl)return String(publicUrl).replace(/\/$/,'');const proto=req.headers['x-forwarded-proto']||'http';return `${proto}://${req.headers.host}`;}
 

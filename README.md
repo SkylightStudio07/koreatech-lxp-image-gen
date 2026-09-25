@@ -2,7 +2,7 @@
 
 학교 AI를 VS Code 안에서 사용하고, 현재 열어 둔 프로젝트를 학교 에이전트가 승인 기반으로 읽고 수정하도록 연결하는 도구입니다. 학교 로그인은 사용자의 Chrome 탭에서 처리하고, 프로젝트 파일과 명령 실행은 각 사용자의 PC에서 수행합니다.
 
-학교·Microsoft의 공식 확장이 아닙니다. 현재 배포 버전은 **School Code 0.18.8**, **Chrome Connector 0.3.0**입니다.
+학교·Microsoft의 공식 확장이 아닙니다. 현재 배포 버전은 **School Code 0.18.9**, **Chrome Connector 0.3.0**입니다.
 
 ## 무엇을 배포하는가
 
@@ -12,7 +12,7 @@
 
 | 파일 | 용도 |
 |---|---|
-| `school-code-0.18.8.vsix` | VS Code 확장 설치 |
+| `school-code-0.18.9.vsix` | VS Code 확장 설치 |
 | `school-code-connector-0.3.0.zip` | Chrome Connector 설치 |
 | `SHA256SUMS.txt` | 다운로드 파일 무결성 확인 |
 
@@ -22,7 +22,7 @@ VSIX 안에도 Connector 폴더가 들어 있지만, Chrome에서는 압축을 �
 
 프로젝트 파일을 에이전트에게 맡기지 않고 학교 AI와 대화만 하려면 MCP를 등록할 필요가 없습니다.
 
-1. 최신 릴리즈에서 `school-code-0.18.8.vsix`를 내려받습니다.
+1. 최신 릴리즈에서 `school-code-0.18.9.vsix`를 내려받습니다.
 2. VS Code의 `Ctrl+Shift+P` → **Extensions: Install from VSIX...**로 VSIX를 설치하고 **Developer: Reload Window**를 실행합니다.
 3. 최신 릴리즈의 `school-code-connector-0.3.0.zip`을 압축 해제합니다.
 4. Chrome 주소창에서 `chrome://extensions`를 열고 **개발자 모드**를 켠 뒤 **압축해제된 확장 프로그램 로드**로 압축 해제한 폴더를 선택합니다.
@@ -97,13 +97,13 @@ GitHub CLI에 로그인되어 있다면 다음처럼 소스 커밋과 릴리즈�
 
 ```powershell
 git add README.md forBCSD.md tools/school-code
-git commit -m "docs: publish School Code 0.18.8 release guide"
+git commit -m "docs: publish School Code 0.18.9 release guide"
 git push origin master
-gh release create v0.18.8 `
-  tools/school-code/school-code-0.18.8.vsix `
+gh release create v0.18.9 `
+  tools/school-code/school-code-0.18.9.vsix `
   tools/school-code/school-code-connector-0.3.0.zip `
   tools/school-code/SHA256SUMS.txt `
-  --title "School Code 0.18.8" `
+  --title "School Code 0.18.9" `
   --notes-file forBCSD.md
 ```
 
