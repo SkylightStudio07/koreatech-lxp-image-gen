@@ -199,6 +199,14 @@ MCP를 등록하는 것만으로 모든 에이전트가 도구를 사용하는 �
 
 에이전트가 `workspace_info`를 호출하면 프로젝트 이름, 도구 목록, 승인 정책이 반환됩니다. 워크플로우 에이전트를 선택한 경우에는 일반 채팅이 아니라 서버의 단계형 실행이 사용되고, VS Code 답변에 LLM/MCP 단계와 완료 상태가 표시됩니다. 이어서 다음처럼 테스트할 수 있습니다.
 
+워크플로우가 `run_end`와 단계 목록만 표시되고 답변 본문이 비어 있으면 VS Code에서 **보기 → 출력 → School Code**를 엽니다. 다음 로그의 길이만 확인해 운영자에게 전달하세요.
+
+```text
+[workflow] run_end text_length=… accumulated_length=… node_output_length=…
+```
+
+세 값이 모두 `0`이면 학교 Workflow API가 최종 답변 텍스트를 보내지 않은 경우입니다. 값이 하나라도 양수인데 화면만 비면 확장 창을 `Developer: Reload Window`로 새로고침하고 같은 요청을 다시 실행합니다. 로그에는 토큰·답변 본문·Notion 내용이 기록되지 않습니다.
+
 ### Figma MCP 연결
 
 Figma 디자인을 에이전트가 읽게 하려면 **MCP 카탈로그 → Figma MCP**를 선택합니다. 공식 원격 주소 `https://mcp.figma.com/mcp`가 기본으로 입력됩니다.
