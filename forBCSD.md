@@ -2,7 +2,7 @@
 
 이 문서는 BCSD 구성원이 Windows에서 **KOREATECH School Code VS Code 확장**을 설치하고, 운영 중인 `bcsd-nai` MCP 중계 서버를 학교 AI에 등록하는 전체 절차를 정리한 문서입니다. 설치만 하면 학교 AI 채팅을 VS Code에서 사용할 수 있고, MCP까지 연결하면 선택한 프로젝트의 파일·셸·Unity 도구를 학교 에이전트가 호출할 수 있습니다.
 
-구성원에게는 GitHub 저장소의 소스 링크보다 **최신 GitHub Release 페이지 링크**를 전달하세요. Release에서 `school-code-0.18.3.vsix`와 `school-code-connector-0.3.0.zip`을 내려받아 설치하면 됩니다. 저장소 소스는 개발·검토용이고, Release 첨부 파일이 일반 구성원의 설치용입니다.
+구성원에게는 GitHub 저장소의 소스 링크보다 **최신 GitHub Release 페이지 링크**를 전달하세요. Release에서 `school-code-0.18.4.vsix`와 `school-code-connector-0.3.0.zip`을 내려받아 설치하면 됩니다. 저장소 소스는 개발·검토용이고, Release 첨부 파일이 일반 구성원의 설치용입니다.
 
 이 문서에서 말하는 서버 주소는 현재 BCSD 서버 기준입니다. 0.10.0부터는 구성원이 정적 토큰을 복사하지 않고 BCSD 계정으로 브라우저 승인하는 개인 페어링 방식이 권장됩니다.
 
@@ -44,7 +44,7 @@ VS Code 안에 채팅 화면과 프로젝트 도구를 설치하는 확장입니
 - Chrome
 - KOREATECH 학교 AI 계정
 - BCSD 릴레이에 등록된 계정(처음이면 브라우저에서 가입)
-- 최신 GitHub Release의 `school-code-0.18.3.vsix`
+- 최신 GitHub Release의 `school-code-0.18.4.vsix`
 - 최신 GitHub Release의 `school-code-connector-0.3.0.zip`
 
 채팅만 사용할 사람은 MCP 토큰이나 Workspace 토큰 없이도 학교 브라우저 연결과 모델 대화까지 설정할 수 있습니다. 프로젝트 파일·Unity·셸 도구를 사용할 사람은 아래 절차를 끝까지 진행해야 합니다.
@@ -61,14 +61,14 @@ PowerShell에서 저장소 루트로 이동한 뒤 VSIX를 설치합니다.
 
 ```powershell
 cd G:\Koreatech-Codex\school-ai
-code --install-extension .\tools\school-code\school-code-0.18.3.vsix --force
+code --install-extension .\tools\school-code\school-code-0.18.4.vsix --force
 code --list-extensions --show-versions | Select-String koreatech-school-code
 ```
 
 정상 결과에는 다음과 비슷한 항목이 표시됩니다.
 
 ```text
-skylight-local.koreatech-school-code@0.18.3
+skylight-local.koreatech-school-code@0.18.4
 ```
 
 VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **Shell Command: Install 'code' command in PATH**를 실행하거나, VSIX 파일을 VS Code 창으로 끌어 놓아 설치합니다.
@@ -78,7 +78,7 @@ VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **
 1. VS Code를 엽니다.
 2. `Ctrl+Shift+P`를 누릅니다.
 3. **Extensions: Install from VSIX...**를 선택합니다.
-4. Release에서 내려받은 `school-code-0.18.3.vsix`를 선택합니다.
+4. Release에서 내려받은 `school-code-0.18.4.vsix`를 선택합니다.
 5. 설치가 끝나면 **Developer: Reload Window**를 실행합니다.
 
 설치 후 왼쪽 Activity Bar에서 `School Code` 아이콘을 선택하고 **학교 AI** 뷰를 엽니다. 아이콘이 보이지 않으면 명령 팔레트에서 **School Code: 채팅 열기**를 실행합니다.
@@ -151,7 +151,7 @@ VS Code가 `code` 명령을 찾지 못하면 VS Code에서 `Ctrl+Shift+P` → **
 
 브라우저에 `School Code 연결` 탭이 여러 개 열렸다면 이전 탭은 모두 닫습니다. 각 탭의 코드는 서로 다른 연결 요청이므로, VS Code가 현재 표시하는 코드와 다른 탭에서 **이 기기를 연결**을 눌러도 현재 요청은 승인되지 않습니다. 최신 VS Code 확장에서는 첫 요청이 승인 대기 중일 때 **학교 Workspace → 연결**을 다시 눌러도 새 코드를 만들지 않고 기존 요청을 계속 확인합니다. 브라우저 승인 후 페이지에 `이 기기가 연결되었습니다`가 표시되고, VS Code에서 `승인 대기 중`이 `연결됨`으로 바뀌는지 확인합니다.
 
-승인 페이지가 계속 버튼만 보여 주거나 MCP 카드가 즉시 `오류`로 바뀌면 VS Code를 `Developer: Reload Window`로 다시 로드하고 최신 `0.18.3` VSIX를 설치하세요. NAS 릴레이도 최신 `dist/relay.cjs`로 재빌드해야 승인 토큰을 잃어버린 경우 재시도할 수 있습니다.
+승인 페이지가 계속 버튼만 보여 주거나 MCP 카드가 즉시 `오류`로 바뀌면 VS Code를 `Developer: Reload Window`로 다시 로드하고 최신 `0.18.4` VSIX를 설치하세요. NAS 릴레이도 최신 `dist/relay.cjs`로 재빌드해야 승인 토큰을 잃어버린 경우 재시도할 수 있습니다.
 
 페어링 모드에서는 사용자·기기·워크스페이스별 워커를 분리합니다. 같은 계정·워크스페이스에서 두 번째 VS Code 창이 연결되면 기존 워커를 보호하기 위해 `409`가 반환됩니다. 정적 토큰 모드의 구버전 릴레이는 여전히 한 인스턴스당 워커 한 개이므로, 구성원별 페어링을 쓰려면 릴레이를 0.10.0으로 업데이트해야 합니다.
 
@@ -301,6 +301,7 @@ $health.ok
 | 학교 MCP 등록 시 `401` | MCP URL/토큰 오류, 두 토큰 혼동 | URL은 `/mcp`까지, 인증은 MCP_TOKEN, Bearer 형식 확인 |
 | 학교 MCP 등록 시 404 | `/health` 또는 기본 주소를 MCP URL로 등록 | `https://bcsd-nai.mywire.org:3010/mcp` 사용 |
 | 도구 목록은 보이지만 호출이 `Worker offline` | VS Code School Code가 Workspace에 연결되지 않음 | VS Code 설정 탭에서 프로젝트 선택 → 학교 Workspace 연결 → 브라우저 연결 확인 |
+| 워크플로우 중 `중계 HTTP 410` | 여러 MCP 도구 실행 또는 승인 대기가 구버전 제한 시간(120초)을 초과 | NAS 릴레이를 최신 버전으로 재빌드하고 `JOB_TIMEOUT_MS=600000` 설정; `/mcp`·`/worker/*` 프록시 타임아웃도 10분 이상으로 설정 |
 | 도구 목록은 보이지만 파일이 엉뚱함 | 다른 VS Code 창/프로젝트가 워커로 연결됨 | 연결된 프로젝트 경로와 활성 VS Code 창 확인; 한 릴레이당 한 워커 원칙 적용 |
 | Unity 도구만 실패 | Unity CLI 경로 또는 Editor 브리지 미설정 | 설정 탭에서 Unity CLI 경로 설정, 필요한 경우 Unity Editor 자동 준비 실행 |
 | Chrome 탭을 여러 개 열었더니 요청이 이상함 | Connector는 학교 채팅 탭 하나만 사용 | 사용하지 않는 학교 AI 탭을 닫고 로그인 탭 하나만 새로고침 |
@@ -330,6 +331,7 @@ npm run keys
 AUTH_STORE_PATH=/data/auth.json
 PUBLIC_URL=https://bcsd-nai.mywire.org:3010
 ALLOW_REGISTRATION=true
+JOB_TIMEOUT_MS=600000
 # 선택: 초대 코드가 필요할 때 설정하고 ALLOW_REGISTRATION=false로 변경
 REGISTRATION_CODE=동아리-초대코드
 ```
@@ -347,13 +349,13 @@ Docker Compose를 쓰면 `/data`를 NAS의 별도 쓰기 가능한 `auth-data` �
 - `/worker/result`
 - `/worker/disconnect`
 
-프록시 설정에서 `Authorization`과 `X-Worker-Id` 헤더를 보존하고, `/worker/poll`과 `/mcp` 응답 타임아웃을 최소 150초 이상으로 설정합니다. TLS 인증서는 외부에서 신뢰할 수 있어야 하며, `/mcp`와 `/worker/*`의 경로를 임의로 `/api` 아래로 바꾸거나 Authorization 헤더를 제거하면 안 됩니다.
+프록시 설정에서 `Authorization`과 `X-Worker-Id` 헤더를 보존하고, `/worker/poll`은 20초 이상, `/mcp`와 `/worker/*` 응답 타임아웃은 `JOB_TIMEOUT_MS`보다 길게 설정합니다(기본 10분). TLS 인증서는 외부에서 신뢰할 수 있어야 하며, `/mcp`와 `/worker/*`의 경로를 임의로 `/api` 아래로 바꾸거나 Authorization 헤더를 제거하면 안 됩니다.
 
 운영자는 정적 `MCP_TOKEN`을 구성원에게 전달하는 대신 각 구성원이 페어링 후 VS Code의 **MCP 인증 JSON 복사**를 사용하도록 안내합니다. Workspace 릴레이는 연결된 VS Code 프로젝트의 파일 읽기·수정·셸·Unity 도구까지 요청할 수 있으므로, 학교 MCP 에이전트 연결 대상과 VS Code 승인 모드를 함께 관리합니다.
 
 ## 13. 최종 체크리스트
 
-- [ ] VS Code에 `skylight-local.koreatech-school-code@0.18.3`이 설치됨
+- [ ] VS Code에 `skylight-local.koreatech-school-code@0.18.4`이 설치됨
 - [ ] Chrome `chrome://extensions`에 KOREATECH School Code Connector가 로드됨
 - [ ] 로그인된 `https://ai.koreatech.ac.kr/AiCA/chat` 탭이 하나 열려 있음
 - [ ] VS Code 설정 탭에서 브라우저가 `연결됨`으로 표시됨
