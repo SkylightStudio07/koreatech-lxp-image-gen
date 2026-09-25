@@ -102,16 +102,52 @@ function activate(context){
     });
   }
   function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,relayPending,relayPairCode,relayError,relayBusy:!!relayConnectPromise||!!relayPairPromise||relayPending,browserBusy:browserConnectBusy,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
+  function normalizeAttachment(value,{imageHint=false}={}){
+    if(!value||typeof value!=='object'||Array.isArray(value))return null;
+    const declaredType=String(value.file_type??value.fileType??value.mime_type??value.mimeType??value.content_type??value.contentType??'').toLowerCase();
+    const namedImage=typeof value.filename==='string'&&/\.(png|jpe?g|webp|gif|svg|avif|bmp|ico|tiff?)$/i.test(value.filename);
+    const rawId=value.file_id??value.fileId??value.attachment_id??value.attachmentId??(imageHint?value.image_id??value.imageId:undefined)??(imageHint&&(declaredType.startsWith('image/')||declaredType==='image'||namedImage)?value.id:undefined);
+    if(!/^[a-zA-Z0-9-]{1,200}$/.test(String(rawId||'')))return null;
+    const item={file_id:String(rawId)};
+    if(typeof value.filename==='string'&&value.filename.trim())item.filename=value.filename.trim().slice(0,240);
+    if(typeof value.file_type==='string'&&value.file_type.trim())item.file_type=value.file_type.slice(0,80);
+    else if(typeof value.fileType==='string'&&value.fileType.trim())item.file_type=value.fileType.slice(0,80);
+    else if(imageHint)item.file_type='image';
+    const size=value.file_size??value.fileSize;
+    if(Number.isFinite(size)&&size>=0)item.file_size=size;
+    return item;
+  }
   function cleanAttachments(value){
-    const list=Array.isArray(value)?value:[];
-    return list.map(a=>{
-      if(!a||typeof a!=='object'||!/^[a-zA-Z0-9-]{1,200}$/.test(String(a.file_id||'')))return null;
-      const item={file_id:String(a.file_id)};
-      if(typeof a.filename==='string'&&a.filename.trim())item.filename=a.filename.trim().slice(0,240);
-      if(typeof a.file_type==='string')item.file_type=a.file_type.slice(0,80);
-      if(Number.isFinite(a.file_size)&&a.file_size>=0)item.file_size=a.file_size;
-      return item;
-    }).filter(Boolean);
+    const list=Array.isArray(value)?value:value&&typeof value==='object'&&Array.isArray(value.attachments)?value.attachments:[];
+    return list.map(a=>normalizeAttachment(a)).filter(Boolean);
+  }
+  function collectWorkflowAttachments(value,options={}){
+    const result=new Map(),seen=new Set();
+    const visit=(current,depth=0,imageHint=false)=>{
+      if(current===null||current===undefined||depth>7)return;
+      if(typeof current==='string'){
+        const trimmed=current.trim();
+        if((trimmed.startsWith('{')||trimmed.startsWith('['))&&trimmed.length<=2*1024*1024){try{visit(JSON.parse(trimmed),depth+1,imageHint);}catch{/* Ordinary node text. */}}
+        return;
+      }
+      if(typeof current!=='object')return;
+      if(seen.has(current))return;seen.add(current);
+      const item=normalizeAttachment(current,{imageHint});if(item)result.set(item.file_id,{...(result.get(item.file_id)||{}),...item});
+      if(Array.isArray(current)){for(const entry of current)visit(entry,depth+1,imageHint);return;}
+      for(const [key,child] of Object.entries(current)){
+        const lower=key.toLowerCase();
+        const childImageHint=imageHint||lower.includes('image')||lower.includes('attachment')||lower==='images';
+        if(['file_id','fileid','attachment_id','attachmentid','image_id','imageid','filename','file_name','filetype','file_type','filesize','file_size'].includes(lower))continue;
+        visit(child,depth+1,childImageHint);
+      }
+    };
+    visit(value,0,Boolean(options.imageHint));
+    return [...result.values()];
+  }
+  function mergeAttachments(...values){
+    const merged=new Map();
+    for(const value of values)for(const item of (Array.isArray(value)?value:cleanAttachments(value)))if(item?.file_id)merged.set(item.file_id,{...(merged.get(item.file_id)||{}),...item});
+    return [...merged.values()];
   }
   function uploadSize(base64){
     const padding=base64.endsWith('==')?2:base64.endsWith('=')?1:0;
@@ -483,11 +519,13 @@ function activate(context){
     const inputText=history?`[이전 대화]\n${history}\n\n[현재 프로젝트와 요청]\n${composed}`:composed;
     const body={input_text:inputText,stream:true};
     if(attachments.length){body.file_ids=attachments.map(item=>item.file_id);body.file_attachments=attachments;}
-    const steps=[];let done=false,lastNodeText='';
+    const steps=[];let done=false,lastNodeText='',workflowAttachments=[];
     const parser=new SSEParser(event=>{
       const type=String(event.type||'').toLowerCase();
       const eventKeys=Object.keys(event||{}).filter(key=>key!=='data').sort().join(',');
       output.appendLine(`[workflow] event=${type||'unknown'} keys=${eventKeys||'(none)'}`);
+      const discovered=collectWorkflowAttachments(event,{imageHint:type.includes('image')});
+      if(discovered.length){workflowAttachments=mergeAttachments(workflowAttachments,discovered);answer.attachments=workflowAttachments;output.appendLine(`[workflow] event=${type||'unknown'} attachment_count=${workflowAttachments.length}`);}
       if(event.conversation_id&&/^[\w-]{1,100}$/.test(String(event.conversation_id)))state.conversationId=String(event.conversation_id);
       if(type==='run_start'){answer.status='워크플로우 시작';steps.push({type,status:'워크플로우 시작'});post({type:'stream',text:answer.text,status:answer.status,steps});return;}
       if(type==='token'){const text=workflowEventText(event);if(text)answer.text+=text;answer.status='LLM 실행 중';post({type:'stream',text:answer.text,status:answer.status,steps});return;}
@@ -498,8 +536,9 @@ function activate(context){
       if(type==='node_error'){const detail=workflowEventText(event)||'워크플로우 단계에서 오류가 발생했습니다.';const code=String(event.code||event.error_code||'');const expected=/PATH_NOT_FOUND|NOT_A_REPOSITORY|경로를 찾을 수 없습니다|Git 저장소가 아닙니다/i.test(`${code} ${detail}`);steps.push({type:'node_error',label:workflowNodeLabel(event),status:expected?'확인 필요':'오류',detail});if(expected){answer.status='경로 또는 저장소를 확인하는 중';post({type:'stream',text:answer.text,status:answer.status,steps});return;}throw Error(detail.slice(0,300));}
       if(type==='run_error'){throw Error((workflowEventText(event)||'워크플로우 실행에 실패했습니다.').slice(0,300));}
       if(type==='run_end'){
-        const text=workflowEventText(event);output.appendLine(`[workflow] run_end text_length=${text.length} accumulated_length=${answer.text.length} node_output_length=${lastNodeText.length} output_shape=${workflowValueShape(event.output)}`);if(!answer.text)answer.text=text||lastNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
-        answer.status='완료';answer.model=event.model_id||event.model;answer.finish_reason=event.finish_reason;answer.runId=event.run_id||event.runId;answer.attachments=cleanAttachments(event.attachments);done=true;steps.push({type:'run_end',status:'완료'});post({type:'stream',text:answer.text,status:answer.status,steps});
+        const text=workflowEventText(event);const finalAttachments=collectWorkflowAttachments(event,{imageHint:true});workflowAttachments=mergeAttachments(workflowAttachments,finalAttachments);answer.attachments=workflowAttachments;
+        output.appendLine(`[workflow] run_end text_length=${text.length} accumulated_length=${answer.text.length} node_output_length=${lastNodeText.length} output_shape=${workflowValueShape(event.output)} image_tools_shape=${workflowValueShape(event.image_tools_attached)} attachment_count=${workflowAttachments.length}`);if(!answer.text)answer.text=text||lastNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
+        answer.status='완료';answer.model=event.model_id||event.model;answer.finish_reason=event.finish_reason;answer.runId=event.run_id||event.runId;done=true;steps.push({type:'run_end',status:'완료'});post({type:'stream',text:answer.text,status:answer.status,steps});
       }
     });
     try{await requestSchool(`/agents/${encodeURIComponent(agent.id)}/workflow/run`,{method:'POST',body,onChunk:t=>parser.push(t),stream:true,signal:controller.signal},(attempt,total)=>{answer.status=`학교 요청 재시도 중… (${attempt}/${total})`;post({type:'stream',text:answer.text,status:answer.status,steps});});parser.end();if(!done)throw Error('워크플로우 응답이 중간에 종료되었습니다. 자동 재시도 횟수를 초과했습니다.');answer.steps=steps;if(compacted||summaryPrefix)state.contextSummary='';await preloadAttachments(answer.attachments);}
