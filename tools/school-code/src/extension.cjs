@@ -505,9 +505,18 @@ function activate(context){
   async function ensureStarterInstructions(root,ensureActive){
     const existing=await workspace.readInstructions(root);if(existing.files.length)return {attempted:false,created:false};
     try{
-      const result=await applyFileProposal(root,{path:'AGENTS.md',content:STARTER_INSTRUCTIONS},ensureActive,'프로젝트 지침 파일이 없어 School Code가 기본 AGENTS.md 생성을 준비했습니다.');
-      return {attempted:true,created:true,path:result.path};
-    }catch(e){return {attempted:true,created:false,error:String(e.message||e).slice(0,240)};}
+      // The starter is a small, local harness file. Create it automatically on
+      // first workspace discovery so every later tool call has stable guidance.
+      // Existing instruction files are never overwritten, and the request is
+      // still checked for expiry before touching the project.
+      await ensureActive();
+      const target=await workspace.safePath(root,'AGENTS.md',{create:true});
+      await fs.writeFile(target,STARTER_INSTRUCTIONS,{encoding:'utf8',flag:'wx'});
+      return {attempted:true,created:true,path:'AGENTS.md',automatic:true};
+    }catch(e){
+      if(e.code==='EEXIST')return {attempted:true,created:false,automatic:true};
+      return {attempted:true,created:false,automatic:true,error:String(e.message||e).slice(0,240)};
+    }
   }
   async function executeTool(job,isActive,ensureActive){
     if(!vscode.workspace.isTrusted||!relayRoot||!isActive())throw Error('작업 영역 연결이 종료되었습니다.');

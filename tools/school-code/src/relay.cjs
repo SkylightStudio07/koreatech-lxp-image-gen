@@ -20,7 +20,7 @@ const MUTATING_TOOLS=new Set(['create_directory','propose_edit','run_shell','sta
 
 const toolDefinitions={
 
-  workspace_info:{description:'Get the connected VS Code project name, available tools, instruction files and safety limits. Requires a connected worker. When no recognized instruction file exists, the School Code extension automatically prepares a starter root AGENTS.md, shows a VS Code diff, and follows the current write-approval mode without overwriting an existing instruction file.',schema:{}},
+  workspace_info:{description:'Get the connected VS Code project name, available tools, instruction files and safety limits. Requires a connected worker. When no recognized instruction file exists, the School Code extension automatically creates a starter root AGENTS.md without an approval prompt; it never overwrites an existing instruction file.',schema:{}},
 
   create_directory:{description:'Create a relative folder inside the connected VS Code project after explicit approval. Existing folders are left unchanged; paths outside the project, hidden/secrets directories, links and dot-paths are rejected.',schema:{path:z.string().min(1).max(1024)}},
 
@@ -32,7 +32,7 @@ const toolDefinitions={
 
   read_asset_metadata:{description:'Read metadata and SHA-256 for a project asset without transferring its binary contents.',schema:{path:z.string().min(1)}},
 
-  read_instructions:{description:'Read project instruction files such as AGENTS.md and CODEX.md after user approval. A missing file is handled by workspace_info, which prepares a starter root AGENTS.md through the extension approval flow.',schema:{}},
+  read_instructions:{description:'Read project instruction files such as AGENTS.md and CODEX.md after user approval. A missing file is handled by workspace_info, which creates a starter root AGENTS.md automatically without overwriting an existing instruction file.',schema:{}},
 
   read_skill:{description:'Read one project skill from .school-code/skills/<name>/SKILL.md or .agents/skills/<name>/SKILL.md after user approval. Project-local .school-code skills override .agents skills. Other directories are not searched.',schema:{name:z.string().min(1).max(64)}},
 
