@@ -398,11 +398,14 @@ function activate(context){
   }
   function workflowEventText(event){
     if(!event||typeof event!=='object')return '';
-    const candidates=[event.content,event.delta,event.text,event.token,event.output,event.result,event.message,event.data];
-    for(const value of candidates){
+    const read=value=>{
       if(typeof value==='string')return value;
-      if(value&&typeof value==='object'){for(const key of ['content','text','delta','output','message'])if(typeof value[key]==='string')return value[key];}
-    }
+      if(Array.isArray(value)){for(const item of value){const text=read(item);if(text)return text;}return '';}
+      if(!value||typeof value!=='object')return '';
+      for(const key of ['content','text','delta','token','output','final_output','final_text','final_answer','answer','response','message','result','data']){const text=read(value[key]);if(text)return text;}
+      return '';
+    };
+    for(const key of ['content','delta','text','token','output','final_output','final_text','final_answer','answer','response','message','result','data']){const text=read(event[key]);if(text)return text;}
     return '';
   }
   function workflowNodeLabel(event){
@@ -427,7 +430,7 @@ function activate(context){
       if(type==='node_error'){const detail=workflowEventText(event)||'워크플로우 단계에서 오류가 발생했습니다.';steps.push({type:'node_error',label:workflowNodeLabel(event),status:'오류',detail});throw Error(detail.slice(0,300));}
       if(type==='run_error'){throw Error((workflowEventText(event)||'워크플로우 실행에 실패했습니다.').slice(0,300));}
       if(type==='run_end'){
-        const text=workflowEventText(event);if(!answer.text)answer.text=text||lastNodeText;
+        const text=workflowEventText(event);if(!answer.text)answer.text=text||lastNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
         answer.status='완료';answer.model=event.model_id||event.model;answer.finish_reason=event.finish_reason;answer.runId=event.run_id||event.runId;answer.attachments=cleanAttachments(event.attachments);done=true;steps.push({type:'run_end',status:'완료'});post({type:'stream',text:answer.text,status:answer.status,steps});
       }
     });
