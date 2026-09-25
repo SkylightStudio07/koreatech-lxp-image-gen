@@ -25,4 +25,5 @@ test('bundled Unity bridge auto-starts and reads the per-user token file',()=>{
   assert.match(source,/unity-editor-ports/);
   assert.match(source,/SavePort\(projectRoot, port\)/);
   assert.match(source,/candidateListener\.Start\(\)/);
+  for(const action of ['unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter'])assert.match(source,new RegExp('case "'+action+'"'));
 });

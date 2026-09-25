@@ -14,7 +14,8 @@ const {RelayAuthStore,encodeCookie,pairingPage}=require('./auth.cjs');
 
 
 
-const MUTATING_TOOLS=new Set(['create_directory','propose_edit','run_shell','start_background_task','task_cancel','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene']);
+const MUTATING_TOOLS=new Set(['create_directory','propose_edit','run_shell','start_background_task','task_cancel','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene','unity_play','unity_pause','unity_stop','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_set_animator_parameter']);
+const vector3=z.object({x:z.number(),y:z.number(),z:z.number()});
 
 
 
@@ -35,6 +36,10 @@ const toolDefinitions={
   list_visual_assets:{description:'List project images and their dimensions, hashes and Unity texture metadata without transferring image bytes.',schema:{path:z.string().default(''),limit:z.number().int().min(1).max(500).default(200)}},
 
   read_image:{description:'Read one project image for visual inspection. Returns image metadata and an MCP image content block. Supported formats: PNG, JPEG, GIF, WebP, SVG and ICO; maximum 16 MiB.',schema:{path:z.string().min(1)}},
+
+  list_model_assets:{description:'List FBX, OBJ, GLB and GLTF model assets with safe metadata only.',schema:{path:z.string().default(''),limit:z.number().int().min(1).max(500).default(200)}},
+
+  read_model_metadata:{description:'Read model format, size, hash and lightweight mesh/animation metadata without transferring the model bytes.',schema:{path:z.string().min(1)}},
 
   read_instructions:{description:'Read project instruction files such as AGENTS.md and CODEX.md after user approval. A missing file is handled by workspace_info, which creates a starter root AGENTS.md automatically without overwriting an existing instruction file.',schema:{}},
 
@@ -76,6 +81,40 @@ const toolDefinitions={
 
   unity_save_scene:{description:'Save the currently open Unity Editor scene after approval.',schema:{}},
 
+  unity_capture_scene:{description:'Capture the active Unity Scene view and return it as an MCP image.',schema:{max_width:z.number().int().min(320).max(1920).default(1280),max_height:z.number().int().min(240).max(1080).default(720)}},
+
+  unity_capture_game:{description:'Capture the Unity Game view or active game camera and return it as an MCP image.',schema:{max_width:z.number().int().min(320).max(1920).default(1280),max_height:z.number().int().min(240).max(1080).default(720)}},
+
+  unity_model_preview:{description:'Render a Unity model asset preview and return it as an MCP image.',schema:{path:z.string().min(1),max_width:z.number().int().min(128).max(1024).default(512),max_height:z.number().int().min(128).max(1024).default(512)}},
+
+  unity_play:{description:'Enter Unity Play Mode after approval.',schema:{}},
+
+  unity_pause:{description:'Pause or resume Unity Play Mode after approval.',schema:{paused:z.boolean().default(true)}},
+
+  unity_stop:{description:'Stop Unity Play Mode after approval.',schema:{}},
+
+  unity_get_console_logs:{description:'Read recent Unity Console/runtime logs.',schema:{limit:z.number().int().min(1).max(200).default(50),clear:z.boolean().default(false)}},
+
+  unity_project_status:{description:'Read current Unity scene, compile/import state, build settings and recent errors.',schema:{log_limit:z.number().int().min(1).max(200).default(50)}},
+
+  unity_add_component:{description:'Add a Component type to a Unity GameObject after approval.',schema:{game_object_id:z.string().min(1),component_type:z.string().min(1).max(200)}},
+
+  unity_remove_component:{description:'Remove a Component from a Unity GameObject after approval.',schema:{game_object_id:z.string().min(1),component_type:z.string().min(1).max(200)}},
+
+  unity_duplicate_gameobject:{description:'Duplicate a Unity GameObject with Undo support after approval.',schema:{game_object_id:z.string().min(1)}},
+
+  unity_delete_gameobject:{description:'Delete a Unity GameObject with Undo support after approval.',schema:{game_object_id:z.string().min(1)}},
+
+  unity_move_gameobject:{description:'Set a Unity GameObject Transform position, rotation or scale after approval.',schema:{game_object_id:z.string().min(1),position:vector3.optional(),rotation:vector3.optional(),scale:vector3.optional()}},
+
+  unity_instantiate_prefab:{description:'Instantiate a project prefab in the open Unity scene after approval.',schema:{prefab_path:z.string().min(1),parent_id:z.string().optional(),position:vector3.optional()}},
+
+  unity_assign_material:{description:'Assign a project Material asset to a Renderer slot after approval.',schema:{game_object_id:z.string().min(1),material_path:z.string().min(1),slot:z.number().int().min(0).max(31).default(0)}},
+
+  unity_get_animator_info:{description:'Read an Animator controller and its parameters.',schema:{game_object_id:z.string().min(1)}},
+
+  unity_set_animator_parameter:{description:'Set a runtime Animator parameter after approval.',schema:{game_object_id:z.string().min(1),name:z.string().min(1).max(200),parameter_type:z.enum(['float','int','bool','trigger']),value:z.string().max(200)}},
+
   propose_edit:{description:'Propose complete UTF-8 file contents. Shows a VS Code diff and requires explicit user approval before writing. Existing file edits require the SHA-256 from read_file.',schema:{path:z.string().min(1),content:z.string().max(200000),expected_sha256:z.string().regex(/^[a-f0-9]{64}$/).optional()}},
 
 };
@@ -104,8 +143,8 @@ function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs
 
     return new Promise((resolve,reject)=>{const id=randomUUID();let settled=false;const cleanup=()=>{clearTimeout(timer);jobs.delete(id);signal?.removeEventListener('abort',abort);};const finish=(error,result)=>{if(settled)return;settled=true;cleanup();error?reject(error):resolve(result);};const abort=()=>finish(Error('Request cancelled'));const timer=setTimeout(()=>finish(Error('Approval/tool timeout. No automatic retry.')),timeoutMs);jobs.set(id,{id,name,args,ownerKey:key,expiresAt:Date.now()+timeoutMs,resolve:r=>finish(null,r),reject:e=>finish(e),timer,delivered:false});signal?.addEventListener('abort',abort,{once:true});dispatch(worker);});}
 
-  function mcpContent(name,result){if(name!=='read_image'||!result||typeof result!=='object'||typeof result.data!=='string')return [{type:'text',text:JSON.stringify(result)}];const {data,...metadata}=result;return [{type:'text',text:JSON.stringify(metadata)},{type:'image',data,mimeType:String(metadata.mime||'application/octet-stream')}];}
-  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.5.0'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:mcpContent(name,await enqueue(name,args,extra.signal,identity))};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
+  function mcpContent(name,result){if(!result||typeof result!=='object')return [{type:'text',text:JSON.stringify(result)}];const imageData=typeof result.data==='string'&&name==='read_image'?result.data:typeof result.image_base64==='string'?result.image_base64:null;if(!imageData)return [{type:'text',text:JSON.stringify(result)}];const metadata={...result};delete metadata.data;delete metadata.image_base64;return [{type:'text',text:JSON.stringify(metadata)},{type:'image',data:imageData,mimeType:String(result.mime||result.mime_type||'image/png')}];}
+  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.17.0'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:mcpContent(name,await enqueue(name,args,extra.signal,identity))};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
 
   function requestBase(req){if(publicUrl)return String(publicUrl).replace(/\/$/,'');const proto=req.headers['x-forwarded-proto']||'http';return `${proto}://${req.headers.host}`;}
 

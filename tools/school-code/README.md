@@ -1,14 +1,14 @@
-# KOREATECH School Code — 0.16.0
+# KOREATECH School Code — 0.17.0
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
-일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.16.0.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
+일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.17.0.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
 
 > **공유 전 확인:** 기존에 동아리에서 사용하던 학교 AI MCP 서버는 권한이 있는 구성원에게 URL과 등록 정보를 공유해도 됩니다. School Code Workspace 릴레이는 이제 BCSD 계정 페어링을 통해 사용자·워크스페이스별 토큰과 워커 연결을 분리합니다. 기존 정적 `MCP_TOKEN`, `WORKER_TOKEN`도 호환되지만 새 설치에서는 브라우저 승인 방식을 권장합니다. 토큰, Notion 토큰, Unity Editor 토큰은 공개 저장소나 단체 채팅에 올리지 마세요.
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.16.0.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.17.0.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -104,7 +104,7 @@ Blender·Unreal MCP는 서버마다 인증·전송 방식이 다릅니다. 이 �
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.16.0.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.17.0.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
 Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 카탈로그의 버튼 이름도 `경로 설정`으로 표시됩니다. 이 단계는 `Unity.exe` 위치를 저장하는 것이며, 계속 실행 중인 MCP 서버를 만드는 과정이 아닙니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것도 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
 
@@ -258,7 +258,18 @@ Unity 공식 Skill이 요구하는 일반 CLI 작업은 아래 셸 하네스를 
 
 일반적으로는 **Unity Editor MCP → 자동 준비**를 누릅니다. 확장이 `Assets/Editor/SchoolCodeMcpBridge.cs`를 설치하고 사용자별 토큰을 만든 뒤 설정된 Unity 실행 파일로 프로젝트를 엽니다. Unity Hub/Editor 로그인이 끝나고 프로젝트가 로드되면 브리지가 자동으로 시작됩니다. 기본 loopback 포트는 `127.0.0.1:18777`이고 이미 사용 중이면 `18778`부터 비어 있는 포트를 자동 선택합니다. 프로젝트별 선택 포트는 사용자 폴더의 `.school-code/unity-editor-ports`에 저장되어 확장이 자동으로 찾아갑니다. 수동으로 설치할 때만 Unity 메뉴의 **School Code → MCP Bridge → Start/Copy Token**을 사용하세요.
 
-브리지 도구는 `unity_open_scene`, `unity_find_gameobjects`, `unity_get_component`, `unity_set_component`, `unity_create_gameobject`, `unity_save_scene`입니다. loopback과 Bearer 토큰을 사용하고 C#·셸 명령을 실행하지 않습니다. 씬/오브젝트를 바꾸는 세 도구는 쓰기 승인 대상입니다. 자세한 설치는 `unity-editor/README.md`를 참고하세요.
+브리지 도구는 씬·GameObject·컴포넌트 조회와 수정, Scene/Game 캡처, 모델 미리보기, Play Mode, Console 로그, 프로젝트 상태, Prefab·Material·Animator 작업을 제공합니다. loopback과 Bearer 토큰을 사용하고 C#·셸 명령을 실행하지 않습니다. 캡처·조회는 읽기 작업이고 씬/오브젝트/재생 상태를 바꾸는 도구는 쓰기 승인 대상입니다. 자세한 설치는 `unity-editor/README.md`를 참고하세요.
+
+주요 Unity Editor 도구는 다음과 같습니다.
+
+- `unity_capture_scene`, `unity_capture_game`: 현재 Scene/Game 화면을 PNG MCP 이미지로 반환
+- `unity_model_preview`: `Assets/` 아래 모델의 Unity 미리보기 반환
+- `unity_play`, `unity_pause`, `unity_stop`: Play Mode 제어
+- `unity_get_console_logs`, `unity_project_status`: 최근 로그, 컴파일·임포트 상태, 현재 씬, 빌드 대상·씬 확인
+- `unity_add_component`, `unity_remove_component`, `unity_duplicate_gameobject`, `unity_delete_gameobject`, `unity_move_gameobject`: Undo 가능한 기본 편집
+- `unity_instantiate_prefab`, `unity_assign_material`, `unity_get_animator_info`, `unity_set_animator_parameter`: 자주 쓰는 에셋·Animator 작업
+
+FBX·OBJ·GLB·GLTF는 Workspace의 `list_model_assets`와 `read_model_metadata`로 파일을 전송하지 않고 기본 메타데이터를 확인합니다. 실제 모습을 볼 때는 Unity가 임포트한 뒤 `unity_model_preview`를 사용합니다.
 
 ### 프로젝트 Skill 자동 로더
 
@@ -312,3 +323,4 @@ code --extensionDevelopmentPath="현재 school-code 폴더의 절대 경로"
 ```
 
 출력 패널 **School Code**에서 중계 연결 오류를 확인할 수 있습니다. 토큰/학교 쿠키/대화 내용을 로그에 출력하지 않습니다.
+

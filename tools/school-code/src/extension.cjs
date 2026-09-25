@@ -526,7 +526,7 @@ function activate(context){
     if(job.name==='workspace_info'){
       const setup=await ensureStarterInstructions(root,ensureActive);const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
        const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
-       return {name:path.basename(root),tools:['create_directory','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+       return {name:path.basename(root),tools:['create_directory','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,model_metadata_max_bytes:workspace.MAX_MODEL_METADATA_BYTES,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
@@ -573,10 +573,11 @@ function activate(context){
       if(result?.output)result.output=result.output.replaceAll(root,'<project>');
       return result;
     }
-    const unityEditorTool=job.name.startsWith('unity_')&&['unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene'].includes(job.name);
+    const unityEditorTools=['unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter'];
+    const unityEditorTool=job.name.startsWith('unity_')&&unityEditorTools.includes(job.name);
     if(unityEditorTool){
       if(mcpRegistry.get('unity-editor')?.enabled===false)throw Error('Unity Editor MCP가 꺼져 있습니다.');
-      const write=['unity_set_component','unity_create_gameobject','unity_save_scene'].includes(job.name);
+      const write=['unity_set_component','unity_create_gameobject','unity_save_scene','unity_play','unity_pause','unity_stop','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_set_animator_parameter'].includes(job.name)||(job.name==='unity_get_console_logs'&&args.clear===true);
       if(!await approval(`학교 AI가 연결된 Unity Editor에서 ${job.name}을 실행하려 합니다.${write?' 씬이나 오브젝트가 변경될 수 있습니다.':''}`,{write}))throw Error('사용자가 거절했습니다.');
       await ensureActive();const result=await unityEditor.call(job.name,args);unityEditorConnected=true;return result;
     }
@@ -584,7 +585,7 @@ function activate(context){
       if(!await approval(`학교 AI가 프로젝트 Skill ${args.name}을 읽으려 합니다. 프로젝트의 .school-code/skills 또는 .agents/skills 안의 지침이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
       await ensureActive();return skills.readSkill(root,args.name);
     }
-    if(!['list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','read_instructions','propose_edit'].includes(job.name))throw Error('지원하지 않는 도구');
+    if(!['list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','propose_edit'].includes(job.name))throw Error('지원하지 않는 도구');
     if(job.name!=='propose_edit'){
       if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트에 ${job.name}을 요청했습니다.\n경로: ${args.path||'/'}${args.query?'\n검색어: '+args.query:''}\n결과는 등록한 중계 서버를 통해 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
       await ensureActive();
@@ -598,6 +599,8 @@ function activate(context){
         if(cached&&cached.sha256===image.sha256){image.data=cached.data;image.cache_hit=true;}else{imageCache.set(image.path,image);while(imageCache.size>8)imageCache.delete(imageCache.keys().next().value);}
         return image;
       }
+      if(job.name==='list_model_assets')return workspace.listModelAssets(root,args.path||'',Math.min(500,args.limit||200));
+      if(job.name==='read_model_metadata')return workspace.readModelMetadata(root,args.path);
       return workspace.readInstructions(root);
     }
     return applyFileProposal(root,args,ensureActive);

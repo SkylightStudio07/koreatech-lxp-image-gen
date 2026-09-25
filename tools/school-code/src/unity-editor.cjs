@@ -1,5 +1,5 @@
 const DEFAULT_PORT=18777;
-const ACTIONS=new Set(['unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene']);
+const ACTIONS=new Set(['unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter']);
 
 function editorPort(value=DEFAULT_PORT){const port=Number(value);if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Unity Editor 브리지 포트가 올바르지 않습니다.');return port;}
 

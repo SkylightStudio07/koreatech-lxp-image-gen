@@ -4,7 +4,7 @@
 
 수동으로 설치하려면 `SchoolCodeMcpBridge.cs`를 Unity 프로젝트의 `Assets/Editor/`에 복사하고 Unity를 다시 로드하세요. 기존 메뉴 `School Code → MCP Bridge → Start`와 `Copy Token`도 계속 사용할 수 있습니다.
 
-브리지는 `127.0.0.1` loopback에만 열리고 Bearer 토큰이 필요합니다. 기본 포트는 `18777`이며 이미 사용 중이면 `18778`부터 비어 있는 포트를 자동으로 선택합니다. 선택한 포트는 프로젝트 경로별로 사용자 폴더의 `.school-code/unity-editor-ports/<경로 해시>.port`에 기록되고 확장이 그 파일을 읽어 연결하므로 Unity Editor를 여러 개 동시에 열 수 있습니다. `unity_open_scene`, `unity_find_gameobjects`, `unity_get_component`, `unity_set_component`, `unity_create_gameobject`, `unity_save_scene`만 처리하며 C# 코드나 셸 명령은 실행하지 않습니다. `set_component`, `create_gameobject`, `save_scene`은 VS Code 승인 모드에 따라 별도 승인을 요구합니다.
+브리지는 `127.0.0.1` loopback에만 열리고 Bearer 토큰이 필요합니다. 기본 포트는 `18777`이며 이미 사용 중이면 `18778`부터 비어 있는 포트를 자동으로 선택합니다. 선택한 포트는 프로젝트 경로별로 사용자 폴더의 `.school-code/unity-editor-ports/<경로 해시>.port`에 기록되고 확장이 그 파일을 읽어 연결하므로 Unity Editor를 여러 개 동시에 열 수 있습니다. 씬·GameObject·컴포넌트 조회/수정, `unity_capture_scene`, `unity_capture_game`, `unity_model_preview`, Play Mode, Console 로그, 프로젝트 상태, Prefab·Material·Animator·Transform 작업을 처리하며 C# 코드나 셸 명령은 실행하지 않습니다. 화면 캡처와 모델 미리보기는 PNG 이미지로 반환됩니다. `set_component`, 오브젝트 편집, Play Mode 변경, 씬 저장은 VS Code 승인 모드에 따라 별도 승인을 요구합니다.
 
 일반적으로 포트를 수동으로 맞출 필요가 없습니다. `schoolCode.unityEditorPort`는 레지스트리가 아직 없을 때의 초기값(기본 18777)으로만 사용합니다. 자동 준비에서 생성한 토큰은 VS Code SecretStorage와 사용자 홈의 `.school-code/unity-editor-token`에 저장되며 프로젝트 폴더에는 저장하지 않습니다.
 
