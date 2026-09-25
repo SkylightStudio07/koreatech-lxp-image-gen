@@ -14,3 +14,4 @@ tools/school-code/dist/
 tools/school-code/*.vsix
 tools/school-code/*.zip
 tools/school-code/SHA256SUMS.txt
+/school-code-*-nas.zip

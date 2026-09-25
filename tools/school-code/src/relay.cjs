@@ -32,6 +32,10 @@ const toolDefinitions={
 
   read_asset_metadata:{description:'Read metadata and SHA-256 for a project asset without transferring its binary contents.',schema:{path:z.string().min(1)}},
 
+  list_visual_assets:{description:'List project images and their dimensions, hashes and Unity texture metadata without transferring image bytes.',schema:{path:z.string().default(''),limit:z.number().int().min(1).max(500).default(200)}},
+
+  read_image:{description:'Read one project image for visual inspection. Returns image metadata and an MCP image content block. Supported formats: PNG, JPEG, GIF, WebP, SVG and ICO; maximum 16 MiB.',schema:{path:z.string().min(1)}},
+
   read_instructions:{description:'Read project instruction files such as AGENTS.md and CODEX.md after user approval. A missing file is handled by workspace_info, which creates a starter root AGENTS.md automatically without overwriting an existing instruction file.',schema:{}},
 
   read_skill:{description:'Read one project skill from .school-code/skills/<name>/SKILL.md or .agents/skills/<name>/SKILL.md after user approval. Project-local .school-code skills override .agents skills. Other directories are not searched.',schema:{name:z.string().min(1).max(64)}},
@@ -100,7 +104,8 @@ function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs
 
     return new Promise((resolve,reject)=>{const id=randomUUID();let settled=false;const cleanup=()=>{clearTimeout(timer);jobs.delete(id);signal?.removeEventListener('abort',abort);};const finish=(error,result)=>{if(settled)return;settled=true;cleanup();error?reject(error):resolve(result);};const abort=()=>finish(Error('Request cancelled'));const timer=setTimeout(()=>finish(Error('Approval/tool timeout. No automatic retry.')),timeoutMs);jobs.set(id,{id,name,args,ownerKey:key,expiresAt:Date.now()+timeoutMs,resolve:r=>finish(null,r),reject:e=>finish(e),timer,delivered:false});signal?.addEventListener('abort',abort,{once:true});dispatch(worker);});}
 
-  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.5.0'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:[{type:'text',text:JSON.stringify(await enqueue(name,args,extra.signal,identity))}]};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
+  function mcpContent(name,result){if(name!=='read_image'||!result||typeof result!=='object'||typeof result.data!=='string')return [{type:'text',text:JSON.stringify(result)}];const {data,...metadata}=result;return [{type:'text',text:JSON.stringify(metadata)},{type:'image',data,mimeType:String(metadata.mime||'application/octet-stream')}];}
+  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.5.0'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:mcpContent(name,await enqueue(name,args,extra.signal,identity))};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
 
   function requestBase(req){if(publicUrl)return String(publicUrl).replace(/\/$/,'');const proto=req.headers['x-forwarded-proto']||'http';return `${proto}://${req.headers.host}`;}
 
@@ -152,7 +157,7 @@ function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs
 
       if(url.pathname==='/worker/status'&&req.method==='POST'){const data=await readJson(req,1000),job=jobs.get(data.id);return json(res,200,{active:Boolean(job&&job.ownerKey===key)});}
 
-      if(url.pathname==='/worker/result'&&req.method==='POST'){const data=await readJson(req,1024*1024),job=jobs.get(data.id);if(!job||job.ownerKey!==key)return json(res,410,{error:'Job expired'});clearTimeout(job.timer);jobs.delete(data.id);data.error?job.reject(Error(String(data.error).slice(0,300))):job.resolve(data.result);return json(res,200,{ok:true});}
+      if(url.pathname==='/worker/result'&&req.method==='POST'){const data=await readJson(req,48*1024*1024),job=jobs.get(data.id);if(!job||job.ownerKey!==key)return json(res,410,{error:'Job expired'});clearTimeout(job.timer);jobs.delete(data.id);data.error?job.reject(Error(String(data.error).slice(0,300))):job.resolve(data.result);return json(res,200,{ok:true});}
 
       if(url.pathname==='/worker/disconnect'&&req.method==='POST'){if(worker.poll){clearTimeout(worker.poll.timer);json(worker.poll.res,200,{});worker.poll=null;}rejectWorkerJobs(key,'VS Code disconnected');worker.lastSeen=0;workers.delete(key);return json(res,200,{ok:true});}
 

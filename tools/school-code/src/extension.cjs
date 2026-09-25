@@ -35,7 +35,7 @@ function activate(context){
   const port=vscode.workspace.getConfiguration('schoolCode').get('bridgePort',18766);
   const bridge=new BrowserBridge(port);let bridgeError='';const ready=bridge.start().catch(e=>{bridgeError=e.code==='EADDRINUSE'?'브리지 포트가 사용 중입니다. 다른 VS Code 창을 닫거나 bridgePort를 변경하세요.':e.message;output.appendLine(bridgeError);});context.subscriptions.push({dispose:()=>bridge.dispose()});
   let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',relayPending=false,relayPairCode='',relayPairPromise=null,relayPairAbort=null,relayConnectPromise=null,browserConnectBusy=false,unityEditorConnected=false,projectBusy=false;
-  const imagePreviews=new Map(),imageLoads=new Map();
+  const imagePreviews=new Map(),imageLoads=new Map(),imageCache=new Map();
   const uploadCache=new Map(),uploadControllers=new Map();
   const MAX_UPLOADS=5,MAX_UPLOAD_BYTES=32*1024*1024,MAX_UPLOAD_BASE64=45*1024*1024;
   const projectContext=new ProjectContext(vscode,context.workspaceState);
@@ -470,7 +470,7 @@ function activate(context){
         previews.set(uri.toString(),content);if(previews.size>100)previews.delete(previews.keys().next().value);
         await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri),{preview:true,viewColumn:vscode.ViewColumn?.Beside});
       }
-    }finally{if(previous!==projectContext.project?.path&&relayController)await disconnectRelay();projectBusy=false;snapshot();}
+    }finally{if(previous!==projectContext.project?.path){imageCache.clear();if(relayController)await disconnectRelay();}projectBusy=false;snapshot();}
   }
   async function approval(detail,{write=false}={}){
     if(state.approvalMode==='full'||(state.approvalMode==='read'&&!write))return true;
@@ -526,7 +526,7 @@ function activate(context){
     if(job.name==='workspace_info'){
       const setup=await ensureStarterInstructions(root,ensureActive);const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
        const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
-       return {name:path.basename(root),tools:['create_directory','list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+       return {name:path.basename(root),tools:['create_directory','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
@@ -584,7 +584,7 @@ function activate(context){
       if(!await approval(`학교 AI가 프로젝트 Skill ${args.name}을 읽으려 합니다. 프로젝트의 .school-code/skills 또는 .agents/skills 안의 지침이 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
       await ensureActive();return skills.readSkill(root,args.name);
     }
-    if(!['list_files','read_file','search_text','read_asset_metadata','read_instructions','propose_edit'].includes(job.name))throw Error('지원하지 않는 도구');
+    if(!['list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','read_instructions','propose_edit'].includes(job.name))throw Error('지원하지 않는 도구');
     if(job.name!=='propose_edit'){
       if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트에 ${job.name}을 요청했습니다.\n경로: ${args.path||'/'}${args.query?'\n검색어: '+args.query:''}\n결과는 등록한 중계 서버를 통해 학교 AI로 전달됩니다.`))throw Error('사용자가 거절했습니다.');
       await ensureActive();
@@ -592,6 +592,12 @@ function activate(context){
       if(job.name==='read_file')return workspace.readLines(root,args);
       if(job.name==='search_text')return workspace.search(root,args);
       if(job.name==='read_asset_metadata')return workspace.readAssetMetadata(root,args.path);
+      if(job.name==='list_visual_assets')return workspace.listVisualAssets(root,args.path||'',Math.min(500,args.limit||200));
+      if(job.name==='read_image'){
+        const image=await workspace.readImage(root,args.path),cached=imageCache.get(image.path);
+        if(cached&&cached.sha256===image.sha256){image.data=cached.data;image.cache_hit=true;}else{imageCache.set(image.path,image);while(imageCache.size>8)imageCache.delete(imageCache.keys().next().value);}
+        return image;
+      }
       return workspace.readInstructions(root);
     }
     return applyFileProposal(root,args,ensureActive);
