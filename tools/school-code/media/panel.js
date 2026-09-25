@@ -259,6 +259,51 @@ function connection(m) {
   tool.textContent = !project ? '프로젝트를 선택하세요' : m.relay ? (agent ? 'MCP 프로젝트 도구 사용 가능 · ' + (m.agents?.find(a => a.id === agent)?.name || '에이전트') : 'MCP 연결됨 · MCP 에이전트를 선택하세요') : 'MCP 중계 연결 필요';
 }
 
+function renderInline(container, text) {
+  const pattern = /(\*\*|__)(.+?)\1|~~(.+?)~~|(`[^`\n]+`)|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(\*|_)([^*_\n]+)\7/g;
+  let last = 0, match;
+  while ((match = pattern.exec(String(text || '')))) {
+    if (match.index > last) container.append(document.createTextNode(String(text).slice(last, match.index)));
+    if (match[2] !== undefined) { const el = document.createElement('strong'); el.textContent = match[2]; container.append(el); }
+    else if (match[3] !== undefined) { const el = document.createElement('del'); el.textContent = match[3]; container.append(el); }
+    else if (match[4] !== undefined) { const el = document.createElement('code'); el.className = 'md-code'; el.textContent = match[4].slice(1, -1); container.append(el); }
+    else if (match[5] !== undefined) { const el = document.createElement('a'); el.href = match[6]; el.target = '_blank'; el.rel = 'noopener noreferrer'; el.textContent = match[5]; container.append(el); }
+    else { const el = document.createElement('em'); el.textContent = match[8]; container.append(el); }
+    last = match.index + match[0].length;
+  }
+  if (last < String(text || '').length) container.append(document.createTextNode(String(text).slice(last)));
+}
+
+function renderMarkdownBlocks(container, text) {
+  const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n');
+  let i = 0;
+  const isSpecial = line => /^\s{0,3}#{1,6}\s+/.test(line) || /^\s*[-*+]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line) || /^\s*>/.test(line) || /^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line);
+  while (i < lines.length) {
+    if (!lines[i].trim()) { i++; continue; }
+    const heading = lines[i].match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (heading) { const el = document.createElement(`h${heading[1].length}`); renderInline(el, heading[2]); container.append(el); i++; continue; }
+    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(lines[i])) { container.append(document.createElement('hr')); i++; continue; }
+    const firstUnordered = lines[i].match(/^\s*[-*+]\s+(.+)$/), firstOrdered = lines[i].match(/^\s*\d+[.)]\s+(.+)$/);
+    if (firstUnordered || firstOrdered) {
+      const list = document.createElement(firstUnordered ? 'ul' : 'ol');
+      while (i < lines.length) {
+        const item = lines[i].match(firstUnordered ? /^\s*[-*+]\s+(.+)$/ : /^\s*\d+[.)]\s+(.+)$/);
+        if (!item) break;
+        const li = document.createElement('li'); renderInline(li, item[1]); list.append(li); i++;
+      }
+      container.append(list); continue;
+    }
+    if (/^\s*>/.test(lines[i])) {
+      const quote = document.createElement('blockquote');
+      while (i < lines.length && /^\s*>/.test(lines[i])) { const line = lines[i].replace(/^\s*>\s?/, ''); renderInline(quote, line); if (i + 1 < lines.length && /^\s*>/.test(lines[i + 1])) quote.append(document.createElement('br')); i++; }
+      container.append(quote); continue;
+    }
+    const paragraph = document.createElement('p');
+    while (i < lines.length && lines[i].trim() && !isSpecial(lines[i])) { renderInline(paragraph, lines[i]); if (i + 1 < lines.length && lines[i + 1].trim() && !isSpecial(lines[i + 1])) paragraph.append(document.createElement('br')); i++; }
+    if (paragraph.childNodes.length) container.append(paragraph);
+  }
+}
+
 function renderText(container, text) {
   const chunks = String(text || '').split(/(```[^\n]*\n[\s\S]*?```)/g);
   for (const chunk of chunks) {
@@ -277,9 +322,7 @@ function renderText(container, text) {
         figure.className = 'inline-svg-preview'; img.src = 'data:image/svg+xml;base64,' + btoa(raw); img.alt = 'SVG 생성 결과'; figure.append(img); wrap.append(figure);
       }
       pre.textContent = code; wrap.append(label, pre); container.append(wrap);
-    } else {
-      const p = document.createElement('div'); p.className = 'prose'; p.textContent = chunk; container.append(p);
-    }
+    } else { const prose = document.createElement('div'); prose.className = 'prose'; renderMarkdownBlocks(prose, chunk); container.append(prose); }
   }
 }
 
@@ -328,7 +371,13 @@ function render() {
     const title = document.createElement('div'); title.className = 'message-role'; title.textContent = m.role === 'user' ? '나' : m.role === 'compaction' ? '컨텍스트 압축' : '학교 AI';
     const content = document.createElement('div'); content.className = 'content'; renderText(content, m.text); article.append(title, content);
     if (m.contextFiles?.length) { const info = document.createElement('small'); info.className = 'message-context'; info.textContent = (m.project || '프로젝트') + ' · ' + m.contextFiles.map(f => f.path).join(', '); article.append(info); }
-    if (m.status) { const status = document.createElement('small'); status.className = 'message-status'; status.textContent = m.status + (m.model ? ' · ' + m.model : ''); article.append(status); }
+    const pending = m.role === 'assistant' && busy && m === messages.at(-1);
+    if (m.status || pending) {
+      const status = document.createElement('small'); status.className = 'message-status' + (pending ? ' pending' : '');
+      if (pending) { const spinner = document.createElement('span'); spinner.className = 'status-spinner'; spinner.setAttribute('aria-hidden', 'true'); status.append(spinner, document.createTextNode('답변 생성 중…')); }
+      else status.textContent = m.status + (m.model ? ' · ' + m.model : '');
+      article.append(status);
+    }
     if (m.steps?.length) {
       const timeline = document.createElement('ol'); timeline.className = 'message-steps';
       for (const step of m.steps) {
