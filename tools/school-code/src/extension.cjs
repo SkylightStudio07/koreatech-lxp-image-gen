@@ -398,15 +398,26 @@ function activate(context){
   }
   function workflowEventText(event){
     if(!event||typeof event!=='object')return '';
-    const read=value=>{
+    const ignored=new Set(['type','status','run_id','workflow_id','agent_id','node_id','node_name','node_type','latency_ms','total_latency_ms','model_id','finish_reason','abort_reason','aborted','cost_usd','credits','tokens','llm_call_count','image_tools_attached','answered_node_id']);
+    const read=(value,depth=0)=>{
       if(typeof value==='string')return value;
-      if(Array.isArray(value)){for(const item of value){const text=read(item);if(text)return text;}return '';}
+      if(Array.isArray(value)){for(const item of value){const text=read(item,depth+1);if(text)return text;}return '';}
       if(!value||typeof value!=='object')return '';
-      for(const key of ['content','text','delta','delta_text','token','output','output_text','generated_text','final','final_output','final_text','final_answer','answer','response','message','result','result_text','value','parts','choices','body','data','raw']){const text=read(value[key]);if(text)return text;}
+      if(depth>6)return '';
+      for(const key of ['content','text','delta','delta_text','token','output','output_text','generated_text','final','final_output','final_text','final_answer','answer','response','message','result','result_text','value','parts','choices','body','data','raw','outputs']){const text=read(value[key],depth+1);if(text)return text;}
+      for(const key of Object.keys(value)){if(ignored.has(key))continue;const text=read(value[key],depth+1);if(text)return text;}
       return '';
     };
-    for(const key of ['content','delta','delta_text','text','token','output','output_text','generated_text','final','final_output','final_text','final_answer','answer','response','message','result','result_text','value','parts','choices','body','data','raw']){const text=read(event[key]);if(text)return text;}
+    for(const key of ['content','delta','delta_text','text','token','output','output_text','generated_text','final','final_output','final_text','final_answer','answer','response','message','result','result_text','value','parts','choices','body','data','raw','outputs']){const text=read(event[key],1);if(text)return text;}
     return '';
+  }
+  function workflowValueShape(value,depth=0){
+    if(typeof value==='string')return `string(${value.length})`;
+    if(value===null||value===undefined)return String(value);
+    if(typeof value!=='object')return typeof value;
+    if(depth>=3)return Array.isArray(value)?`array(${value.length})`:'object';
+    if(Array.isArray(value))return `array(${value.length})`;
+    return `{${Object.keys(value).slice(0,24).map(key=>`${key}:${workflowValueShape(value[key],depth+1)}`).join(',')}}`;
   }
   function workflowNodeLabel(event){
     const value=event?.node_name||event?.node_id||event?.node||event?.step||event?.name||'';
@@ -432,7 +443,7 @@ function activate(context){
       if(type==='node_error'){const detail=workflowEventText(event)||'워크플로우 단계에서 오류가 발생했습니다.';steps.push({type:'node_error',label:workflowNodeLabel(event),status:'오류',detail});throw Error(detail.slice(0,300));}
       if(type==='run_error'){throw Error((workflowEventText(event)||'워크플로우 실행에 실패했습니다.').slice(0,300));}
       if(type==='run_end'){
-        const text=workflowEventText(event);output.appendLine(`[workflow] run_end text_length=${text.length} accumulated_length=${answer.text.length} node_output_length=${lastNodeText.length}`);if(!answer.text)answer.text=text||lastNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
+        const text=workflowEventText(event);output.appendLine(`[workflow] run_end text_length=${text.length} accumulated_length=${answer.text.length} node_output_length=${lastNodeText.length} output_shape=${workflowValueShape(event.output)}`);if(!answer.text)answer.text=text||lastNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
         answer.status='완료';answer.model=event.model_id||event.model;answer.finish_reason=event.finish_reason;answer.runId=event.run_id||event.runId;answer.attachments=cleanAttachments(event.attachments);done=true;steps.push({type:'run_end',status:'완료'});post({type:'stream',text:answer.text,status:answer.status,steps});
       }
     });
