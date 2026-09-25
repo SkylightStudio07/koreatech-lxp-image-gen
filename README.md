@@ -2,7 +2,7 @@
 
 학교 AI를 VS Code 안에서 사용하고, 현재 열어 둔 프로젝트를 학교 에이전트가 승인 기반으로 읽고 수정하도록 연결하는 도구입니다. 학교 로그인은 사용자의 Chrome 탭에서 처리하고, 프로젝트 파일과 명령 실행은 각 사용자의 PC에서 수행합니다.
 
-학교·Microsoft의 공식 확장이 아닙니다. 현재 배포 버전은 **School Code 0.17.0**, **Chrome Connector 0.3.0**입니다.
+학교·Microsoft의 공식 확장이 아닙니다. 현재 배포 버전은 **School Code 0.18.0**, **Chrome Connector 0.3.0**입니다.
 
 ## 무엇을 배포하는가
 
@@ -12,7 +12,7 @@
 
 | 파일 | 용도 |
 |---|---|
-| `school-code-0.17.0.vsix` | VS Code 확장 설치 |
+| `school-code-0.18.0.vsix` | VS Code 확장 설치 |
 | `school-code-connector-0.3.0.zip` | Chrome Connector 설치 |
 | `SHA256SUMS.txt` | 다운로드 파일 무결성 확인 |
 
@@ -22,7 +22,7 @@ VSIX 안에도 Connector 폴더가 들어 있지만, Chrome에서는 압축을 �
 
 프로젝트 파일을 에이전트에게 맡기지 않고 학교 AI와 대화만 하려면 MCP를 등록할 필요가 없습니다.
 
-1. 최신 릴리즈에서 `school-code-0.17.0.vsix`를 내려받습니다.
+1. 최신 릴리즈에서 `school-code-0.18.0.vsix`를 내려받습니다.
 2. VS Code의 `Ctrl+Shift+P` → **Extensions: Install from VSIX...**로 VSIX를 설치하고 **Developer: Reload Window**를 실행합니다.
 3. 최신 릴리즈의 `school-code-connector-0.3.0.zip`을 압축 해제합니다.
 4. Chrome 주소창에서 `chrome://extensions`를 열고 **개발자 모드**를 켠 뒤 **압축해제된 확장 프로그램 로드**로 압축 해제한 폴더를 선택합니다.
@@ -64,6 +64,7 @@ School Code의 카탈로그는 로컬 연결 정보를 저장하는 화면입니
 - **Unity Editor MCP**: **자동 준비**를 누르면 브리지 파일·로컬 토큰·Editor 실행을 준비합니다. Scene/Game 캡처, 모델 미리보기, Play Mode·Console·프로젝트 상태, Prefab·Material·Animator·GameObject 작업을 지원합니다.
 - **3D 에셋**: `list_model_assets`와 `read_model_metadata`로 FBX/OBJ/GLB/GLTF의 기본 메타데이터를 확인하고, Unity 임포트 후 `unity_model_preview`로 실제 모습을 전달합니다.
 - **Blender/Unreal/기타 HTTPS MCP**: 서버의 HTTPS `/mcp` 주소와 개인 Bearer 토큰을 입력하고, 학교 AI에도 같은 MCP를 등록합니다.
+- **Figma MCP**: 공식 원격 주소 `https://mcp.figma.com/mcp`를 사용하고 학교 MCP 등록 화면에서 OAuth로 로그인합니다. 별도 Bearer 서버일 때만 토큰을 입력합니다.
 
 자세한 화면별 절차와 장애 대응은 [forBCSD.md](forBCSD.md), 확장 기능 설명은 [tools/school-code/README.md](tools/school-code/README.md)를 참고하세요.
 
@@ -96,13 +97,13 @@ GitHub CLI에 로그인되어 있다면 다음처럼 소스 커밋과 릴리즈�
 
 ```powershell
 git add README.md forBCSD.md tools/school-code
-git commit -m "docs: publish School Code 0.17.0 release guide"
+git commit -m "docs: publish School Code 0.18.0 release guide"
 git push origin master
-gh release create v0.17.0 `
-  tools/school-code/school-code-0.17.0.vsix `
+gh release create v0.18.0 `
+  tools/school-code/school-code-0.18.0.vsix `
   tools/school-code/school-code-connector-0.3.0.zip `
   tools/school-code/SHA256SUMS.txt `
-  --title "School Code 0.17.0" `
+  --title "School Code 0.18.0" `
   --notes-file forBCSD.md
 ```
 

@@ -265,12 +265,12 @@ function activate(context){
   async function configureRemoteMcp(id,seed={}){
     const item=McpRegistry.catalogItem(id)||seed;
     const current=mcpRegistry.get(id);
-    const raw=await vscode.window.showInputBox({title:`${item.name||'MCP'} 주소`,prompt:'MCP 서버의 HTTPS 주소를 입력하세요. 예: https://example.com/mcp',value:current?.url||'',ignoreFocusOut:true});
+    const raw=await vscode.window.showInputBox({title:`${item.name||'MCP'} 주소`,prompt:item.auth==='oauth-or-bearer'?'Figma 공식 MCP는 이 주소를 사용합니다. OAuth를 지원하는 학교 MCP 등록 화면에서 인증하세요.':'MCP 서버의 HTTPS 주소를 입력하세요. 예: https://example.com/mcp',value:current?.url||item.defaultUrl||'',ignoreFocusOut:true});
     if(!raw)return;
     const url=safeRemoteUrl(raw);
     const secretKey=`schoolCode.mcp.token.${id}`;
     const previous=await context.secrets.get(secretKey);
-    const token=await vscode.window.showInputBox({title:`${item.name||'MCP'} 토큰`,prompt:'Bearer 토큰이 있다면 입력하세요. 토큰은 VS Code SecretStorage에만 저장됩니다. 토큰 없이 공개 서버를 사용할 수도 있습니다.',password:true,value:previous||'',ignoreFocusOut:true});
+    const token=await vscode.window.showInputBox({title:`${item.name||'MCP'} 토큰`,prompt:item.auth==='oauth-or-bearer'?'Bearer 토큰 방식의 서버라면 입력하세요. Figma OAuth를 사용할 때는 비워 두고 학교 MCP 등록 화면에서 로그인합니다. 토큰은 VS Code SecretStorage에만 저장됩니다.':'Bearer 토큰이 있다면 입력하세요. 토큰은 VS Code SecretStorage에만 저장됩니다. 토큰 없이 공개 서버를 사용할 수도 있습니다.',password:true,value:previous||'',ignoreFocusOut:true});
     if(token===undefined)return;
     if(token.trim()&&token.trim().length<16)throw Error('MCP 토큰은 16자 이상이어야 합니다.');
     if(token.trim())await context.secrets.store(secretKey,token.trim());else await context.secrets.delete(secretKey);

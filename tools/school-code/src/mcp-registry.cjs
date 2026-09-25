@@ -58,6 +58,17 @@ const MCP_CATALOG = Object.freeze([
     configurable: true,
     capabilities: ['unreal', 'editor'],
   },
+  {
+    id: 'figma',
+    name: 'Figma MCP',
+    description: 'Figma 파일·프레임·컴포넌트 정보를 MCP로 읽고 디자인 컨텍스트를 제공합니다.',
+    kind: 'remote-mcp',
+    builtIn: true,
+    configurable: true,
+    defaultUrl: 'https://mcp.figma.com/mcp',
+    auth: 'oauth-or-bearer',
+    capabilities: ['figma', 'design', 'read', 'code'],
+  },
 ]);
 
 function cleanText(value, fallback, max = 240) {

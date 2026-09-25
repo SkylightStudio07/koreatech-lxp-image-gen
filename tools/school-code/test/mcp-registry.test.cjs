@@ -33,3 +33,12 @@ test('invalid remote URL is not persisted as a usable URL', () => {
   assert.equal(value.url, '');
   assert.equal(value.kind, 'remote-mcp');
 });
+
+test('Figma catalogue entry provides the official remote MCP endpoint', () => {
+  const registry = new McpRegistry(storage());
+  const figma = registry.list().find(item => item.id === 'figma');
+  assert.equal(figma.defaultUrl, 'https://mcp.figma.com/mcp');
+  assert.equal(figma.auth, 'oauth-or-bearer');
+  assert.deepEqual(figma.capabilities, ['figma', 'design', 'read', 'code']);
+  assert.equal('token' in figma, false);
+});
