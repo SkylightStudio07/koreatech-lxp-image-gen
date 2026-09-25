@@ -12,6 +12,7 @@ const {ProjectContext}=require('./project-context.cjs');
 const {SessionStore}=require('./sessions.cjs');
 const {NotionClient}=require('./notion.cjs');
 const unity=require('./unity.cjs');
+const git=require('./git.cjs');
 const {UnityEditorClient}=require('./unity-editor.cjs');
 const skills=require('./skills.cjs');
 const {runShell,TaskManager}=require('./harness.cjs');
@@ -32,10 +33,10 @@ This file was created automatically when School Code connected this project.
 `;
 const HARNESS_INSTRUCTIONS=`[School Code 작업 규칙]
 이 요청은 실제 기존 프로젝트에서 수행됩니다. 프로젝트 파일과 도구 결과를 유일한 사실로 취급하세요.
-수정이 필요하면 먼저 workspace_info와 프로젝트 지침을 확인하고, 관련 디렉터리 목록·대상 파일·호출부·사용할 심볼을 조사하세요. 확인하지 못한 API, 필드, enum, 싱글턴을 추측해서 만들지 마세요.
+수정이 필요하면 먼저 workspace_info와 프로젝트 지침을 확인하고, 관련 디렉터리 목록·대상 파일·호출부·사용할 심볼을 조사하세요. 확인하지 못한 API, 필드, enum, 싱글턴을 추측해서 만들지 마세요. 사용자의 설명에 나온 이름을 실제 파일·폴더 경로로 가정하지 말고 path_info, list_files, search_text로 먼저 존재를 확인하세요. 없는 경로를 조사하다가 create_directory를 호출하지 마세요. 폴더 생성은 사용자가 명시적으로 요청했거나 생성할 파일의 승인된 목적지가 필요할 때만 수행하세요. PATH_NOT_FOUND와 빈 검색 결과는 정상적인 조사 결과로 처리하고 비슷한 실제 경로를 다시 확인하세요.
 기존 파일은 필요한 부분만 바꾸고 전체 재작성하지 마세요. 수정안을 제시할 때 실제로 확인한 파일과 심볼, 변경 이유, 검증 방법을 함께 설명하세요.
 수정 후에는 프로젝트의 컴파일·테스트·검증 도구를 실행하세요. 오류가 나면 선언부와 호출부를 다시 읽은 뒤 수정하고, 검증하지 못했으면 성공했다고 말하지 마세요.
-읽기·검색은 필요한 만큼 자유롭게 진행하되, 파일 쓰기와 위험한 명령은 승인과 diff 검토를 거칩니다.`;
+읽기·검색은 필요한 만큼 자유롭게 진행하되, 파일 쓰기와 위험한 명령은 승인과 diff 검토를 거칩니다. Git 작업 전에는 git_info와 git_status를 확인하세요. 사용자가 요청하지 않으면 브랜치 변경·stage·commit·pull·push를 하지 말고, commit과 push 전에는 변경 요약과 검증 결과를 보여 주세요.`;
 
 function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
@@ -76,6 +77,17 @@ function activate(context){
     const value=vscode.workspace.getConfiguration('schoolCode').get('unityExecutable','');
     return !!value&&value!=='Unity.exe';
   }
+  function gitExecutable(){
+    const saved=context.globalState?.get?.('schoolCode.gitExecutable');
+    if(typeof saved==='string'&&saved.trim())return saved.trim();
+    return vscode.workspace.getConfiguration('schoolCode').get('gitExecutable','git')||'git';
+  }
+  function gitPathConfigured(){
+    const saved=context.globalState?.get?.('schoolCode.gitExecutable');
+    if(typeof saved==='string'&&saved.trim())return true;
+    const value=vscode.workspace.getConfiguration('schoolCode').get('gitExecutable','git');
+    return !!value&&value!=='git';
+  }
   function mcpSnapshot(){
     const notionConfigured=!!mcpRegistry.get('notion');
     const unityEditorConfigured=!!mcpRegistry.get('unity-editor');
@@ -84,6 +96,7 @@ function activate(context){
       if(item.id==='school-workspace'){configured=configured||relayConnected||relayPending;status=relayConnected?'connected':relayPending?'pending':relayError?'error':configured?'configured':'not-connected';}
       if(item.id==='notion'){configured=notionConfigured;status=configured?'configured':'not-configured';}
       if(item.id==='unity-cli'){configured=unityPathConfigured()||!!mcpRegistry.get('unity-cli');status=configured?'configured':'not-configured';}
+      if(item.id==='git-cli'){configured=gitPathConfigured()||!!mcpRegistry.get('git-cli');status=configured?'configured':'not-configured';}
       if(item.id==='unity-editor'){configured=unityEditorConfigured;status=unityEditorConnected?'connected':configured?'configured':'not-configured';}
       return {...item,configured,status,error:item.id==='school-workspace'?relayError:''};
     });
@@ -207,6 +220,15 @@ function activate(context){
     await context.globalState?.update?.('schoolCode.unityExecutable',executable.trim());mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});await mcpRegistry.save();snapshot();
     vscode.window.showInformationMessage('Unity CLI 경로를 저장했습니다.');
   }
+  async function configureGit(){
+    const current=gitExecutable();
+    const executable=await vscode.window.showInputBox({title:'Git 실행 파일 경로',prompt:'기본값은 PATH의 git입니다. portable Git을 쓰면 git.exe 전체 경로를 입력하세요.',value:current||'git',ignoreFocusOut:true});
+    if(!executable)return;
+    await context.globalState?.update?.('schoolCode.gitExecutable',executable.trim());
+    mcpRegistry.upsert({id:'git-cli',catalogId:'git-cli',name:'Git CLI',description:'연결된 프로젝트의 Git 상태·diff·브랜치·커밋·동기화를 관리합니다.',kind:'local',enabled:true,capabilities:['git','version-control','commit']});
+    await mcpRegistry.save();snapshot();
+    vscode.window.showInformationMessage('Git CLI 경로를 저장했습니다.');
+  }
   async function writeUnityEditorToken(token){
     const directory=path.join(os.homedir(),'.school-code');
     await fs.mkdir(directory,{recursive:true});
@@ -291,6 +313,7 @@ function activate(context){
     if(id==='notion')return configureNotion();
     if(id==='unity-cli')return configureUnity();
     if(id==='unity-editor')return configureUnityEditor();
+    if(id==='git-cli')return configureGit();
     return configureRemoteMcp(id,item);
   }
   async function chooseMcp(){
@@ -323,6 +346,10 @@ function activate(context){
       await context.globalState?.update?.('schoolCode.unityExecutable',undefined);
       mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;
     }
+    if(item.catalogId==='git-cli'){
+      await context.globalState?.update?.('schoolCode.gitExecutable',undefined);
+      mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();return;
+    }
     if(await vscode.window.showWarningMessage(`${item.name} 연결 정보를 삭제할까요?`,{modal:true},'삭제')!=='삭제')return;
     await context.secrets.delete(`schoolCode.mcp.token.${item.id}`);mcpRegistry.remove(item.id);await mcpRegistry.save();snapshot();
   }
@@ -332,6 +359,7 @@ function activate(context){
     if((await context.secrets.get('schoolCode.notion.integrationToken')||notionLinks.length)&&!mcpRegistry.get('notion')){mcpRegistry.upsert({id:'notion',catalogId:'notion',name:'Notion',description:notionLinks.length?'등록한 공개 Notion 페이지를 검색·읽기 전용으로 가져옵니다.':'공유한 Notion 페이지를 읽기 전용으로 검색합니다.',kind:'integration',enabled:true,capabilities:['search','read']});changed=true;}
     if(await context.secrets.get('schoolCode.unity.editorToken')&&!mcpRegistry.get('unity-editor')){mcpRegistry.upsert({id:'unity-editor',catalogId:'unity-editor',name:'Unity Editor MCP',description:'실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',kind:'local-mcp',enabled:true,capabilities:['unity','scene']});changed=true;}
     if(unityPathConfigured()&&!mcpRegistry.get('unity-cli')){mcpRegistry.upsert({id:'unity-cli',catalogId:'unity-cli',name:'Unity CLI',description:'연결된 Unity 프로젝트에서 테스트·빌드를 실행합니다.',kind:'local',enabled:true,capabilities:['unity','build']});changed=true;}
+    if(gitPathConfigured()&&!mcpRegistry.get('git-cli')){mcpRegistry.upsert({id:'git-cli',catalogId:'git-cli',name:'Git CLI',description:'연결된 프로젝트의 Git 상태·diff·브랜치·커밋·동기화를 관리합니다.',kind:'local',enabled:true,capabilities:['git','version-control','commit']});changed=true;}
     if(changed){await mcpRegistry.save();snapshot();}
   }
   function configuredRelayUrl(){
@@ -467,7 +495,7 @@ function activate(context){
         const text=workflowEventText(event);if(text)lastNodeText=text;
         const label=workflowNodeLabel(event);steps.push({type:'node_output',label,status:'단계 완료'});answer.status=/(mcp|tool)/i.test(label)?'MCP 도구 실행 중':'단계 완료';post({type:'stream',text:answer.text,status:answer.status,steps});return;
       }
-      if(type==='node_error'){const detail=workflowEventText(event)||'워크플로우 단계에서 오류가 발생했습니다.';steps.push({type:'node_error',label:workflowNodeLabel(event),status:'오류',detail});throw Error(detail.slice(0,300));}
+      if(type==='node_error'){const detail=workflowEventText(event)||'워크플로우 단계에서 오류가 발생했습니다.';const code=String(event.code||event.error_code||'');const expected=/PATH_NOT_FOUND|NOT_A_REPOSITORY|경로를 찾을 수 없습니다|Git 저장소가 아닙니다/i.test(`${code} ${detail}`);steps.push({type:'node_error',label:workflowNodeLabel(event),status:expected?'확인 필요':'오류',detail});if(expected){answer.status='경로 또는 저장소를 확인하는 중';post({type:'stream',text:answer.text,status:answer.status,steps});return;}throw Error(detail.slice(0,300));}
       if(type==='run_error'){throw Error((workflowEventText(event)||'워크플로우 실행에 실패했습니다.').slice(0,300));}
       if(type==='run_end'){
         const text=workflowEventText(event);output.appendLine(`[workflow] run_end text_length=${text.length} accumulated_length=${answer.text.length} node_output_length=${lastNodeText.length} output_shape=${workflowValueShape(event.output)}`);if(!answer.text)answer.text=text||lastNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
@@ -603,8 +631,35 @@ function activate(context){
     const notionTool=job.name.startsWith('notion_');
     if(job.name==='workspace_info'){
       const setup=await ensureStarterInstructions(root,ensureActive);const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
-       const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
-       return {name:path.basename(root),tools:['create_directory','save_image_asset','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,model_metadata_max_bytes:workspace.MAX_MODEL_METADATA_BYTES,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000}};
+      const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
+      const tools=['path_info','create_directory','save_image_asset','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','read_skill','git_info','git_status','git_diff','git_log','git_branches','git_create_branch','git_stage','git_commit','git_fetch','git_pull','git_push','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter','propose_edit'];
+      let gitState;try{gitState=await git.repositoryInfo(root,{executable:gitExecutable()});}catch(error){gitState={repository:false,code:error.code||'GIT_ERROR',message:error.message};}
+      return {name:path.basename(root),tools,write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,git:gitState,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,model_metadata_max_bytes:workspace.MAX_MODEL_METADATA_BYTES,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000}};
+    }
+    if(job.name==='path_info'){
+      if(!await approval(`학교 AI가 연결된 프로젝트에서 경로 존재 여부를 확인하려 합니다.\n경로: ${args.path||'.'}`))throw Error('사용자가 거절했습니다.');
+      await ensureActive();return workspace.pathInfo(root,args.path||'');
+    }
+    const gitReadTools=['git_info','git_status','git_diff','git_log','git_branches'];
+    const gitWriteTools=['git_create_branch','git_stage','git_commit','git_fetch','git_pull','git_push'];
+    if(gitReadTools.includes(job.name)||gitWriteTools.includes(job.name)){
+      if(mcpRegistry.get('git-cli')?.enabled===false)throw Error('Git CLI가 꺼져 있습니다. MCP 카탈로그에서 다시 켜세요.');
+      const write=gitWriteTools.includes(job.name);
+      const detail=`학교 AI가 연결된 프로젝트에서 ${job.name}을 실행하려 합니다.${write?' Git 상태가 변경될 수 있습니다.':''}`;
+      if(!await approval(detail,{write}))throw Error('사용자가 거절했습니다.');
+      await ensureActive();
+      const options={executable:gitExecutable()};
+      if(job.name==='git_info')return git.repositoryInfo(root,options);
+      if(job.name==='git_status')return git.status(root,options);
+      if(job.name==='git_diff')return git.diff(root,args,options);
+      if(job.name==='git_log')return git.log(root,args,options);
+      if(job.name==='git_branches')return git.branches(root,options);
+      if(job.name==='git_create_branch')return git.createBranch(root,args,options);
+      if(job.name==='git_stage')return git.stage(root,args,options);
+      if(job.name==='git_commit')return git.commit(root,args,options);
+      if(job.name==='git_fetch')return git.fetch(root,args,options);
+      if(job.name==='git_pull')return git.pull(root,args,options);
+      return git.push(root,args,options);
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
@@ -800,7 +855,7 @@ function activate(context){
     if(m.type==='disconnectRelay')return await disconnectRelay();
   }catch(e){const message=String(e?.message||e||'알 수 없는 오류').slice(0,300);output.appendLine(`오류: ${message}`);if(m?.type==='relay'||m?.type==='relayRepair'){relayConnected=false;relayError=message;snapshot();}post({type:'notice',text:message});vscode.window.showErrorMessage('School Code: '+message);}}
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
-  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.repairRelay':()=>connectRelay({forcePair:true}),'schoolCode.copyMcpAuth':copyMcpAuth,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
+  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.repairRelay':()=>connectRelay({forcePair:true}),'schoolCode.copyMcpAuth':copyMcpAuth,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor,'schoolCode.gitConfigure':configureGit}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
   const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();for(const c of uploadControllers.values())c.abort();uploadControllers.clear();void disconnectRelay();void taskManager.dispose();}});
   async function autoReconnectRelay(){
     if(!vscode.workspace.isTrusted||!vscode.workspace.workspaceFolders?.length)return;

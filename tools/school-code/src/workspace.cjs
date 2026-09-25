@@ -7,10 +7,10 @@ async function safePath(root,input,{directory=false,create=false}={}){
   if(typeof input!=='string'||input.length>1024||/[\x00-\x1f:]/.test(input)||path.isAbsolute(input)||input.startsWith('\\'))throw Error('상대 경로만 허용됩니다.');
   const parts=input.split(/[\\/]/).filter(Boolean);if(parts.some(p=>p==='..'||p==='.'||DENIED.test(p)||/[. ]$/.test(p)))throw Error('차단된 경로입니다.');
   root=await fs.realpath(root);let target=root;
-  for(let i=0;i<parts.length;i++){target=path.join(target,parts[i]);let s;try{s=await fs.lstat(target);}catch(e){if(e.code==='ENOENT'&&create&&i===parts.length-1)return target;throw Error('경로를 찾을 수 없습니다.');}
+  for(let i=0;i<parts.length;i++){target=path.join(target,parts[i]);let s;try{s=await fs.lstat(target);}catch(e){if(e.code==='ENOENT'&&create&&i===parts.length-1)return target;if(e.code==='ENOENT'){const error=Error('경로를 찾을 수 없습니다.');error.code='PATH_NOT_FOUND';throw error;}throw e;}
     if(s.isSymbolicLink()||(!s.isDirectory()&&s.nlink>1)||!relativeInside(root,await fs.realpath(target)))throw Error('링크 경로는 허용되지 않습니다.');
-    if(i<parts.length-1&&!s.isDirectory())throw Error('디렉터리가 아닙니다.');
-    if(i===parts.length-1&&(directory?!s.isDirectory():!s.isFile()))throw Error('파일 형식이 맞지 않습니다.');
+    if(i<parts.length-1&&!s.isDirectory()){const error=Error('디렉터리가 아닙니다.');error.code='PATH_NOT_DIRECTORY';throw error;}
+    if(i===parts.length-1&&(directory?!s.isDirectory():!s.isFile())){const error=Error('파일 형식이 맞지 않습니다.');error.code=directory?'PATH_NOT_DIRECTORY':'PATH_NOT_FILE';throw error;}
   }
   if(!parts.length&&!directory)throw Error('파일 경로를 지정하세요.');return target;
 }
@@ -30,6 +30,14 @@ async function createDirectory(root,input){
     current=next;
   }
   return {path:input.replace(/\\/g,'/'),created};
+}
+async function pathInfo(root,input=''){
+  if(typeof input!=='string'||input.length>1024)throw Error('경로가 올바르지 않습니다.');
+  if(!input.trim())return {path:'',exists:true,type:'directory'};
+  try{await safePath(root,input,{directory:true});return {path:input.replace(/\\/g,'/'),exists:true,type:'directory'};}
+  catch(error){if(error.code!=='PATH_NOT_FOUND'&&error.code!=='PATH_NOT_DIRECTORY')throw error;}
+  try{await safePath(root,input);return {path:input.replace(/\\/g,'/'),exists:true,type:'file'};}
+  catch(error){if(error.code==='PATH_NOT_FOUND'||error.code==='PATH_NOT_FILE')return {path:input.replace(/\\/g,'/'),exists:false,code:'PATH_NOT_FOUND',message:'경로를 찾을 수 없습니다.'};throw error;}
 }
 const sha=s=>createHash('sha256').update(s).digest('hex');
 const MAX_TEXT_BYTES=16*1024*1024;
@@ -82,7 +90,7 @@ async function readInstructions(root){
   }
   return {files,total_chars:total};
 }
-async function listFiles(root,input='',limit=200,{excludeDirectories=new Set()}={}){const start=await safePath(root,input,{directory:true});const out=[];let visited=0;async function walk(dir){let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch(e){if(['EACCES','EPERM','ENOENT'].includes(e.code))return;throw e;}for(const e of entries){if(out.length>=limit||++visited>5000)return;if(DENIED.test(e.name)||e.isSymbolicLink()||e.isDirectory()&&excludeDirectories.has(e.name))continue;const p=path.join(dir,e.name),rel=path.relative(root,p).split(path.sep).join('/');if(e.isDirectory())await walk(p);else if(e.isFile())out.push(rel);}}await walk(start);return {files:out.sort(),truncated:out.length>=limit||visited>5000};}
+async function listFiles(root,input='',limit=200,{excludeDirectories=new Set()}={}){let start;try{start=await safePath(root,input,{directory:true});}catch(error){if(error.code==='PATH_NOT_FOUND')return {path:input.replace(/\\/g,'/'),exists:false,code:'PATH_NOT_FOUND',files:[],truncated:false};throw error;}const out=[];let visited=0;async function walk(dir){let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch(e){if(['EACCES','EPERM','ENOENT'].includes(e.code))return;throw e;}for(const e of entries){if(out.length>=limit||++visited>5000)return;if(DENIED.test(e.name)||e.isSymbolicLink()||e.isDirectory()&&excludeDirectories.has(e.name))continue;const p=path.join(dir,e.name),rel=path.relative(root,p).split(path.sep).join('/');if(e.isDirectory())await walk(p);else if(e.isFile())out.push(rel);}}await walk(start);return {path:input.replace(/\\/g,'/'),exists:true,files:out.sort(),truncated:out.length>=limit||visited>5000};}
 async function readLines(root,args){const r=await readText(root,args.path);const lines=r.text.split(/\r?\n/),start=args.start_line||1,end=args.end_line||300;if(end<start||end-start>1000)throw Error('한 번에 최대 1001줄을 읽을 수 있습니다.');return {path:args.path,sha256:r.hash,total_lines:lines.length,start_line:start,content:lines.slice(start-1,end).join('\n')};}
-async function search(root,args){if(typeof args.query!=='string'||!args.query||args.query.length>200)throw Error('검색어 오류');const listed=await listFiles(root,args.path||'',500);const matches=[];for(const file of listed.files){let r;try{r=await readText(root,file);}catch{continue;}let n=0;for(const line of r.text.split(/\r?\n/)){n++;if(line.includes(args.query)){matches.push({path:file,line:n,text:line.slice(0,500)});if(matches.length>=(args.limit||50))return {matches,truncated:true};}}}return {matches,truncated:listed.truncated};}
-module.exports={safePath,createDirectory,readText,readLines,listFiles,search,readAssetMetadata,readInstructions,readImage,listVisualAssets,readModelMetadata,listModelAssets,parseImageHeader,parseUnityTextureMeta,MAX_IMAGE_BYTES,MAX_MODEL_METADATA_BYTES,sha};
+async function search(root,args){if(typeof args.query!=='string'||!args.query||args.query.length>200)throw Error('검색어 오류');const listed=await listFiles(root,args.path||'',500);if(listed.exists===false)return {path:listed.path,exists:false,code:'PATH_NOT_FOUND',matches:[],truncated:false};const matches=[];for(const file of listed.files){let r;try{r=await readText(root,file);}catch{continue;}let n=0;for(const line of r.text.split(/\r?\n/)){n++;if(line.includes(args.query)){matches.push({path:file,line:n,text:line.slice(0,500)});if(matches.length>=(args.limit||50))return {path:listed.path,exists:true,matches,truncated:true};}}}return {path:listed.path,exists:true,matches,truncated:listed.truncated};}
+module.exports={safePath,createDirectory,pathInfo,readText,readLines,listFiles,search,readAssetMetadata,readInstructions,readImage,listVisualAssets,readModelMetadata,listModelAssets,parseImageHeader,parseUnityTextureMeta,MAX_IMAGE_BYTES,MAX_MODEL_METADATA_BYTES,sha};

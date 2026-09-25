@@ -134,7 +134,7 @@ function renderMcp(m) {
     const status = document.createElement('span'); status.className = 'mcp-status' + (item.status === 'error' ? ' error' : '') + (item.status === 'pending' ? ' pending' : ''); status.textContent = mcpStatus(item.enabled === false ? 'disabled' : item.status);
     info.append(title, desc, status);
     const actions = document.createElement('div'); actions.className = 'mcp-actions';
-    const configure = document.createElement('button'); configure.textContent = item.id === 'unity-cli' ? '경로 설정' : item.id === 'unity-editor' ? '자동 준비' : item.configured ? '설정' : '연결'; configure.title = item.description; configure.disabled = !!m.busy || (item.id === 'school-workspace' && !!m.relayBusy); configure.addEventListener('click', () => vscode.postMessage({ type: 'mcpConfigure', id: item.id }));
+    const configure = document.createElement('button'); configure.textContent = item.id === 'unity-cli' || item.id === 'git-cli' ? '경로 설정' : item.id === 'unity-editor' ? '자동 준비' : item.configured ? '설정' : '연결'; configure.title = item.description; configure.disabled = !!m.busy || (item.id === 'school-workspace' && !!m.relayBusy); configure.addEventListener('click', () => vscode.postMessage({ type: 'mcpConfigure', id: item.id }));
     actions.append(configure);
     if (item.configured) {
       const toggle = document.createElement('button'); toggle.textContent = item.enabled === false ? '켜기' : '끄기'; toggle.disabled = !!m.busy; toggle.addEventListener('click', () => vscode.postMessage({ type: 'mcpToggle', id: item.id, enabled: item.enabled === false })); actions.append(toggle);

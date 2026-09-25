@@ -1,8 +1,8 @@
-# KOREATECH School Code — 0.18.9
+# KOREATECH School Code — 0.19.0
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
-일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.18.9.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
+일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.19.0.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
 
 > **공유 전 확인:** 기존에 동아리에서 사용하던 학교 AI MCP 서버는 권한이 있는 구성원에게 URL과 등록 정보를 공유해도 됩니다. School Code Workspace 릴레이는 이제 BCSD 계정 페어링을 통해 사용자·워크스페이스별 토큰과 워커 연결을 분리합니다. 기존 정적 `MCP_TOKEN`, `WORKER_TOKEN`도 호환되지만 새 설치에서는 브라우저 승인 방식을 권장합니다. 토큰, Notion 토큰, Unity Editor 토큰은 공개 저장소나 단체 채팅에 올리지 마세요.
 
@@ -14,7 +14,7 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.18.9.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.19.0.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -36,7 +36,8 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 - 대화 세션은 패널의 세션 목록에서 분리됩니다. 새 대화·이름 변경·삭제가 가능하며 세션마다 학교 대화 ID, 모델, 에이전트, 응답 모드와 도구 승인 설정을 따로 저장합니다.
 - 세션별 **컨텍스트 압축**을 선택할 수 있습니다. 켜면 약 3.2만·6만·9만자 기준을 넘을 때 오래된 대화를 로컬 요약으로 묶고 새 학교 대화 ID로 이어갑니다. 서버가 자동 압축을 지원하는지와 관계없이 이 세션에서만 확실하게 동작하며, 압축하지 않을 때는 기존 대화 ID를 그대로 유지합니다.
 - 도구 승인은 `매번 확인`, `읽기는 자동 승인 · 수정은 확인`, `모두 자동 승인` 중에서 세션별로 선택합니다. 기본값은 `매번 확인`이며, 자동 승인 모드에서도 프로젝트 루트·비밀 경로 제한은 유지됩니다.
-- 학교 Workspace 도구에는 `create_directory`가 포함됩니다. 상대 경로의 새 폴더와 중첩 폴더만 만들 수 있고, 프로젝트 밖 경로·숨김/비밀 경로·심볼릭 링크·기존 파일은 거부합니다. 폴더 생성은 파일 수정과 같은 쓰기 승인으로 처리됩니다.
+- 학교 Workspace 도구에는 `path_info`와 `create_directory`가 포함됩니다. 없는 경로를 확인하는 것은 정상적인 읽기 결과이며, 경로가 없다고 폴더를 자동 생성하지 않습니다. 상대 경로의 새 폴더와 중첩 폴더만 만들 수 있고, 프로젝트 밖 경로·숨김/비밀 경로·심볼릭 링크·기존 파일은 거부합니다. 폴더 생성은 파일 수정과 같은 쓰기 승인으로 처리됩니다.
+- Git CLI 도구는 연결된 PC의 Git을 사용해 상태·diff·로그·브랜치를 읽고, 승인 후 선택 파일 stage·commit·fast-forward pull·push를 실행합니다. Git 인증 정보와 SSH 키는 NAS로 전송하지 않습니다.
 - `save_image_asset`은 학교 AI가 생성했거나 대화에 첨부한 이미지의 `file_id`를 연결된 프로젝트 안의 PNG/JPEG/WebP/GIF/SVG/ICO 파일로 저장합니다. 부모 폴더는 먼저 `create_directory`로 만들고, 저장·덮어쓰기 모두 승인 대상입니다. 이미지는 16 MiB 이하이며 SVG 안전성도 확인합니다.
 - 중단 시 브라우저가 진행 중인 요청을 취소합니다. 이미 학교 서버에서 처리된 이용량까지 취소되는 것은 아닙니다. 자동 재전송하지 않습니다.
 - 대화는 VS Code의 해당 작업 영역 로컬 상태에 최근 100개 메시지까지 저장됩니다.
@@ -77,7 +78,7 @@ Codex처럼 세션마다 장기 작업 목표를 저장할 수 있습니다. 입
 
 ## MCP 카탈로그와 연결 관리
 
-패널의 **MCP 카탈로그**에서 학교 Workspace, Notion, Unity CLI, Unity Editor MCP, Blender MCP, Unreal MCP, Figma MCP를 한 곳에서 확인하고 연결·해제할 수 있습니다. 카탈로그의 **사이트** 버튼은 `schoolCode.mcpCatalogUrl`에 지정한 학교/개인 카탈로그를 열고, 주소를 아직 지정하지 않았다면 최초 한 번 입력받아 전역 설정에 저장합니다. HTTPS만 허용하며 로컬 개발 주소는 `localhost`·`127.0.0.1`만 HTTP를 사용할 수 있습니다.
+패널의 **MCP 카탈로그**에서 학교 Workspace, Notion, Git CLI, Unity CLI, Unity Editor MCP, Blender MCP, Unreal MCP, Figma MCP를 한 곳에서 확인하고 연결·해제할 수 있습니다. 카탈로그의 **사이트** 버튼은 `schoolCode.mcpCatalogUrl`에 지정한 학교/개인 카탈로그를 열고, 주소를 아직 지정하지 않았다면 최초 한 번 입력받아 전역 설정에 저장합니다. HTTPS만 허용하며 로컬 개발 주소는 `localhost`·`127.0.0.1`만 HTTP를 사용할 수 있습니다.
 
 Blender·Unreal처럼 별도 서버를 쓰는 항목은 주소와 Bearer 토큰을 입력하면 연결 정보와 토큰이 저장됩니다. 주소·기능 목록은 VS Code의 로컬 상태에, 토큰은 SecretStorage에만 저장됩니다. 이 확장은 임의의 외부 MCP를 학교 AI의 에이전트에 자동 등록하거나 서버 도구를 대신 실행하지 않습니다. 학교 **리소스 → MCP**에서 서버를 등록하고 해당 서버가 연결된 에이전트를 선택해야 실제 대화에서 도구가 호출됩니다. 카탈로그는 이 과정을 한 곳에서 관리하기 위한 클라이언트 설정 화면입니다.
 
@@ -93,6 +94,7 @@ Figma MCP는 공식 원격 주소 `https://mcp.figma.com/mcp`가 자동으로 �
 |---|---|---|
 | 학교 Workspace | **학교 Workspace → 연결** → `BCSD 계정으로 브라우저 승인`(권장) 또는 `WORKER_TOKEN` 입력 | `연결됨`과 `도구별 승인` 표시 |
 | Notion | Integration Secret을 입력하거나 공개 Notion 페이지 링크를 **Notion → 연결**에 붙여넣기 | `설정됨` 표시. 학교 Workspace와 에이전트도 필요 |
+| Git CLI | **Git CLI → 경로 설정** → 기본값 `git` 또는 `git.exe` 경로 입력 | `설정됨` 표시. Git 저장소가 아니면 `NOT_A_REPOSITORY`를 정상 결과로 반환 |
 | Unity CLI | Unity 프로젝트를 선택하고 **Unity CLI → 연결** → `Unity.exe` 경로 입력 | `설정됨` 표시. Editor 브리지는 필요 없음 |
 | Unity Editor MCP | **Unity Editor MCP → 자동 준비** → Unity Editor 로그인/프로젝트 로딩 | `연결됨` 표시. 브리지 파일·토큰·Editor 실행을 자동 처리 |
 | Blender MCP | 실행 중인 HTTPS MCP의 주소(대개 `/mcp`)와 Bearer 토큰 입력 | `설정됨` 표시. 학교 리소스·에이전트 등록도 필요 |
@@ -119,7 +121,7 @@ Blender·Unreal·Figma MCP는 서버마다 인증·전송 방식이 다릅니다
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.18.9.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.19.0.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
 Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 카탈로그의 버튼 이름도 `경로 설정`으로 표시됩니다. 이 단계는 `Unity.exe` 위치를 저장하는 것이며, 계속 실행 중인 MCP 서버를 만드는 과정이 아닙니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것도 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
 
@@ -246,6 +248,25 @@ Notion에서 Internal Integration을 만든 뒤 읽을 페이지와 데이터베
 
 Notion 쓰기 API는 노출하지 않습니다. 모든 조회도 세션 승인 모드에 따라 승인되며, 페이지가 Integration에 공유되지 않았고 공개 링크도 등록하지 않았다면 명확한 오류를 반환합니다. 공개 링크 읽기는 Notion의 공개 읽기 엔드포인트를 사용하므로 로그인 정보나 Integration Secret을 전송하지 않습니다.
 
+### Git CLI
+
+Git CLI는 별도 NAS 서버가 아니라 현재 VS Code PC에서 실행됩니다. **연결된 프로젝트**를 먼저 선택한 뒤 **Git CLI → 경로 설정**에서 기본값 `git`을 사용하거나 portable Git의 `git.exe` 경로를 입력합니다. 학교 Workspace MCP를 연결한 에이전트가 다음 도구를 사용할 수 있습니다.
+
+- 읽기: `git_info`, `git_status`, `git_diff`, `git_log`, `git_branches`
+- 승인 작업: `git_create_branch`, `git_stage`, `git_commit`, `git_fetch`, `git_pull`, `git_push`
+
+에이전트는 작업 전 상태와 diff를 확인하고, 사용자가 요청하지 않으면 브랜치 변경·commit·pull·push를 하지 않습니다. `git_stage`는 지정한 파일만 처리하며 `git add -A`, 강제 push, `reset --hard`, `clean -fd`는 제공하지 않습니다. `.env`, 토큰, 인증 JSON, SSH 키 같은 민감 파일은 목록에서 숨기거나 stage를 거부합니다.
+
+Git 저장소가 아닌 폴더에서는 `NOT_A_REPOSITORY`가 정상 결과로 반환됩니다. 사용자의 설명에 나온 “게임 구조” 같은 이름은 실제 경로로 가정하지 않고 `path_info`, `list_files`, `search_text`로 먼저 확인합니다. 없는 경로를 확인하는 것은 워크플로우를 중단시키지 않습니다.
+
+예시 요청:
+
+```text
+현재 브랜치와 변경 파일을 확인해줘.
+변경 내용을 검토하고 테스트가 통과하면 수정한 파일만 stage해서 커밋해줘.
+원격 push는 하지 마.
+```
+
 ### Unity CLI
 
 패널의 **연결 및 외부 MCP → Unity CLI 경로 설정** 또는 명령 팔레트의 **School Code: Unity CLI 경로 설정**에서 `Unity.exe` 경로를 지정합니다. `Unity.exe`가 PATH에 있으면 기본값 그대로 둘 수 있습니다. 에이전트가 사용할 수 있는 도구는 고정되어 있습니다.
@@ -303,6 +324,7 @@ npx skills add Unity-Technologies/skills
 ### 제공 도구
 
 - `workspace_info`: 연결된 작업 영역 이름, 격리 범위, 지침 파일 및 기능
+- `path_info`: 파일·폴더가 실제로 존재하는지 확인. 없는 경로는 정상적인 결과로 반환
 - `list_files`: 최대 500개 파일 목록
 - `read_file`: UTF-8 텍스트 및 SHA-256
 - `search_text`: 문자열 검색
@@ -312,13 +334,15 @@ npx skills add Unity-Technologies/skills
 - `save_image_asset`: 학교 AI 이미지 첨부를 연결된 프로젝트의 이미지 파일로 저장 (승인·형식·용량·SVG 안전성 확인)
 - `read_instructions`: `AGENTS.md`, `CODEX.md`, `CLAUDE.md` 등의 프로젝트 지침 읽기
 - `read_skill`: 프로젝트 `.school-code/skills` 또는 `.agents/skills` 지침 읽기 (`.school-code` 우선)
+- `git_info`, `git_status`, `git_diff`, `git_log`, `git_branches`: 로컬 Git 상태·변경·이력 읽기
+- `git_create_branch`, `git_stage`, `git_commit`, `git_fetch`, `git_pull`, `git_push`: 승인된 Git 변경·동기화
 - `run_shell`: 승인된 프로젝트 내부 셸 명령 실행
 - `start_background_task`, `task_status`, `task_output`, `task_cancel`: 장시간 셸 작업 관리
 - `propose_edit`: 전체 파일 수정안 → VS Code diff → 승인 → 적용·저장
 
 프로젝트에 `AGENTS.md`, `CODEX.md`, `CLAUDE.md` 같은 지침 파일이 없으면 첫 `workspace_info` 때 School Code가 기본 루트 `AGENTS.md`를 자동으로 생성합니다. 최초 하네스 부트스트랩 파일이므로 이 생성만큼은 diff·승인 창을 띄우지 않습니다. 기존 지침 파일이 있으면 절대 덮어쓰지 않고 그 파일을 우선 읽습니다. 생성된 초안은 프로젝트를 조사한 뒤 에이전트에게 `propose_edit`으로 다듬도록 요청할 수 있습니다.
 
-읽기·검색·수정은 **건별 승인**합니다. 수정은 검토 중 파일이 바뀌면 거절됩니다. 작업은 120초 후 만료되므로 승인 알림을 확인하세요. 로컬 프로젝트 하나만 연결되며 다른 창이 중계를 동시에 점유할 수 없습니다. `.env`, 키 파일, `.git`, `.ssh`, 의존성 폴더, 심볼릭 링크/정션, 상위 경로 접근을 차단합니다. 이미지 목록은 `Library`, `Temp`, `Build` 같은 생성 폴더를 건너뛰고, 실제 이미지 바이트는 `read_image`로 지정한 파일만 전달합니다. SVG는 스크립트·이벤트 핸들러·외부 URL이 있으면 거부하며, 이미지 한 장은 16 MiB로 제한합니다.
+읽기·검색·수정은 **건별 승인**합니다. 수정은 검토 중 파일이 바뀌면 거절됩니다. 로컬 프로젝트 하나만 연결되며 다른 창이 중계를 동시에 점유할 수 없습니다. `.env`, 키 파일, `.git`, `.ssh`, 의존성 폴더, 심볼릭 링크/정션, 상위 경로 접근을 차단합니다. 이미지 목록은 `Library`, `Temp`, `Build` 같은 생성 폴더를 건너뛰고, 실제 이미지 바이트는 `read_image`로 지정한 파일만 전달합니다. SVG는 스크립트·이벤트 핸들러·외부 URL이 있으면 거부하며, 이미지 한 장은 16 MiB로 제한합니다. 없는 프로젝트 경로는 `PATH_NOT_FOUND` 결과로 보고하고 워크플로우를 중단하지 않습니다.
 
 ## 검증과 현재 범위
 

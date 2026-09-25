@@ -32,6 +32,15 @@ const MCP_CATALOG = Object.freeze([
     capabilities: ['unity', 'build'],
   },
   {
+    id: 'git-cli',
+    name: 'Git CLI',
+    description: '연결된 프로젝트의 Git 상태·diff·브랜치·커밋·동기화를 관리합니다.',
+    kind: 'local',
+    builtIn: true,
+    configurable: true,
+    capabilities: ['git', 'version-control', 'commit'],
+  },
+  {
     id: 'unity-editor',
     name: 'Unity Editor MCP',
     description: '실행 중인 Unity Editor의 씬과 게임 오브젝트를 제어합니다.',
