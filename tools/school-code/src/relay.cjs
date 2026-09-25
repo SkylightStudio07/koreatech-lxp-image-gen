@@ -119,7 +119,7 @@ const toolDefinitions={
 
 };
 
-function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs=10*60*1000,authFile='',registrationCode='',allowRegistration=true,publicUrl='',pairingTtlMs=10*60*1000}={}){
+function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs=30*60*1000,authFile='',registrationCode='',allowRegistration=true,publicUrl='',pairingTtlMs=10*60*1000}={}){
 
   const staticConfigured=Boolean(mcpToken||workerToken);
   if(staticConfigured&&(!mcpToken||!workerToken||mcpToken.length<32||workerToken.length<32||mcpToken===workerToken))throw Error('Set distinct MCP_TOKEN and WORKER_TOKEN (at least 32 characters).');
@@ -144,7 +144,7 @@ function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs
     return new Promise((resolve,reject)=>{const id=randomUUID();let settled=false;const cleanup=()=>{clearTimeout(timer);jobs.delete(id);signal?.removeEventListener('abort',abort);};const finish=(error,result)=>{if(settled)return;settled=true;cleanup();error?reject(error):resolve(result);};const abort=()=>finish(Error('Request cancelled'));const timer=setTimeout(()=>finish(Error('Approval/tool timeout. No automatic retry.')),timeoutMs);jobs.set(id,{id,name,args,ownerKey:key,expiresAt:Date.now()+timeoutMs,resolve:r=>finish(null,r),reject:e=>finish(e),timer,delivered:false});signal?.addEventListener('abort',abort,{once:true});dispatch(worker);});}
 
   function mcpContent(name,result){if(!result||typeof result!=='object')return [{type:'text',text:JSON.stringify(result)}];const imageData=typeof result.data==='string'&&name==='read_image'?result.data:typeof result.image_base64==='string'?result.image_base64:null;if(!imageData)return [{type:'text',text:JSON.stringify(result)}];const metadata={...result};delete metadata.data;delete metadata.image_base64;return [{type:'text',text:JSON.stringify(metadata)},{type:'image',data:imageData,mimeType:String(result.mime||result.mime_type||'image/png')}];}
-  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.18.4'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:mcpContent(name,await enqueue(name,args,extra.signal,identity))};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
+  function mcp(identity){const server=new McpServer({name:'koreatech-workspace',version:'0.18.5'});for(const [name,d]of Object.entries(toolDefinitions))server.registerTool(name,{description:d.description,inputSchema:d.schema,annotations:{readOnlyHint:!MUTATING_TOOLS.has(name),destructiveHint:MUTATING_TOOLS.has(name),openWorldHint:name.startsWith('notion_')}},async (args,extra)=>{try{return {content:mcpContent(name,await enqueue(name,args,extra.signal,identity))};}catch(e){return {isError:true,content:[{type:'text',text:e.message}]};}});return server;}
 
   function requestBase(req){if(publicUrl)return String(publicUrl).replace(/\/$/,'');const proto=req.headers['x-forwarded-proto']||'http';return `${proto}://${req.headers.host}`;}
 
@@ -194,7 +194,7 @@ function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs
 
       if(url.pathname==='/worker/poll'&&req.method==='GET'){if(worker.poll){clearTimeout(worker.poll.timer);json(worker.poll.res,200,{});}const p={res,timer:setTimeout(()=>{if(worker.poll===p)worker.poll=null;json(res,200,{});},20000)};worker.poll=p;res.on('close',()=>{if(worker.poll===p){clearTimeout(p.timer);worker.poll=null;}});dispatch(worker);return;}
 
-      if(url.pathname==='/worker/status'&&req.method==='POST'){const data=await readJson(req,1000),job=jobs.get(data.id);return json(res,200,{active:Boolean(job&&job.ownerKey===key)});}
+      if(url.pathname==='/worker/status'&&req.method==='POST'){const data=await readJson(req,1000),job=jobs.get(data.id),active=Boolean(job&&job.ownerKey===key);if(active){clearTimeout(job.timer);job.expiresAt=Date.now()+timeoutMs;job.timer=setTimeout(()=>job.reject(Error('Approval/tool timeout. No automatic retry.')),timeoutMs);}return json(res,200,{active,expiresAt:active?job.expiresAt:0});}
 
       if(url.pathname==='/worker/result'&&req.method==='POST'){const data=await readJson(req,48*1024*1024),job=jobs.get(data.id);if(!job||job.ownerKey!==key)return json(res,410,{error:'Job expired'});clearTimeout(job.timer);jobs.delete(data.id);data.error?job.reject(Error(String(data.error).slice(0,300))):job.resolve(data.result);return json(res,200,{ok:true});}
 
@@ -214,7 +214,7 @@ function createRelay({mcpToken,workerToken,host='127.0.0.1',port=18880,timeoutMs
 
 }
 
-if(require.main===module){const path=require('node:path');const authFile=process.env.AUTH_STORE_PATH||path.resolve(process.env.AUTH_STORE||'.local/auth.json');const configuredTimeout=Number(process.env.JOB_TIMEOUT_MS||10*60*1000);const timeoutMs=Number.isFinite(configuredTimeout)?Math.min(15*60*1000,Math.max(30000,configuredTimeout)):10*60*1000;const app=createRelay({mcpToken:process.env.MCP_TOKEN,workerToken:process.env.WORKER_TOKEN,authFile,registrationCode:process.env.REGISTRATION_CODE,allowRegistration:process.env.ALLOW_REGISTRATION!=='false',publicUrl:process.env.PUBLIC_URL,host:process.env.HOST||'127.0.0.1',port:Number(process.env.PORT||18880),timeoutMs});app.listen().then(a=>console.log(`School MCP relay listening on ${a.address}:${a.port} (job timeout ${timeoutMs}ms)`));for(const sig of ['SIGINT','SIGTERM'])process.on(sig,()=>app.close().then(()=>process.exit(0)));}
+if(require.main===module){const path=require('node:path');const authFile=process.env.AUTH_STORE_PATH||path.resolve(process.env.AUTH_STORE||'.local/auth.json');const configuredTimeout=Number(process.env.JOB_TIMEOUT_MS||30*60*1000);const timeoutMs=Number.isFinite(configuredTimeout)?Math.min(2*60*60*1000,Math.max(30000,configuredTimeout)):30*60*1000;const app=createRelay({mcpToken:process.env.MCP_TOKEN,workerToken:process.env.WORKER_TOKEN,authFile,registrationCode:process.env.REGISTRATION_CODE,allowRegistration:process.env.ALLOW_REGISTRATION!=='false',publicUrl:process.env.PUBLIC_URL,host:process.env.HOST||'127.0.0.1',port:Number(process.env.PORT||18880),timeoutMs});app.listen().then(a=>console.log(`School MCP relay listening on ${a.address}:${a.port} (job timeout ${timeoutMs}ms)`));for(const sig of ['SIGINT','SIGTERM'])process.on(sig,()=>app.close().then(()=>process.exit(0)));}
 
 
 

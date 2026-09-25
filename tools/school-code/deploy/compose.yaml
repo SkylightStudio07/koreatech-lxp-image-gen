@@ -10,8 +10,8 @@ services:
       AUTH_STORE_PATH: /data/auth.json
       # 역방향 프록시의 외부 HTTPS 주소로 바꾸세요.
       PUBLIC_URL: ${PUBLIC_URL:-https://bcsd-nai.mywire.org:3010}
-      # 여러 MCP 도구를 순차 실행하는 워크플로우를 위해 10분 동안 작업을 유지합니다.
-      JOB_TIMEOUT_MS: ${JOB_TIMEOUT_MS:-600000}
+      # 여러 MCP 도구를 순차 실행하는 워크플로우를 위해 30분 동안 작업을 유지합니다.
+      JOB_TIMEOUT_MS: ${JOB_TIMEOUT_MS:-1800000}
     volumes:
       - ../.local/auth-data:/data
     ports:
