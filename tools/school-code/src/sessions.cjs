@@ -2,6 +2,8 @@ const {randomUUID}=require('node:crypto');
 
 function normalize(input,now=Date.now()){
   const value=input&&typeof input==='object'?input:{};
+  const rawGoal=value.goal&&typeof value.goal==='object'?value.goal:null;
+  const goal=rawGoal&&typeof rawGoal.text==='string'&&rawGoal.text.trim()?{text:rawGoal.text.trim().slice(0,1000),status:rawGoal.status==='completed'?'completed':'active',createdAt:Number.isFinite(rawGoal.createdAt)?rawGoal.createdAt:now,updatedAt:Number.isFinite(rawGoal.updatedAt)?rawGoal.updatedAt:now}:null;
   return {
     id:typeof value.id==='string'&&value.id?value.id:randomUUID(),
     title:typeof value.title==='string'&&value.title.trim()?value.title.trim().slice(0,80):'새 대화',
@@ -14,6 +16,7 @@ function normalize(input,now=Date.now()){
     contextCompaction:value.contextCompaction===true,
     compactionThreshold:Number.isFinite(value.compactionThreshold)?Math.min(90000,Math.max(16000,Math.trunc(value.compactionThreshold))):60000,
     contextSummary:typeof value.contextSummary==='string'?value.contextSummary.slice(0,18000):'',
+    goal,
     createdAt:Number.isFinite(value.createdAt)?value.createdAt:now,
     updatedAt:Number.isFinite(value.updatedAt)?value.updatedAt:now,
   };

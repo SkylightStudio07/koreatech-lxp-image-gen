@@ -42,7 +42,19 @@ function activate(context){
   const sessionStore=new SessionStore(context.workspaceState);let state=sessionStore.active;
   const mcpRegistry=new McpRegistry(context.workspaceState);
   const notion=new NotionClient({getToken:()=>context.secrets.get('schoolCode.notion.integrationToken'),getPublicLinks:()=>context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[]});
-  const unityEditor=new UnityEditorClient({getToken:()=>context.secrets.get('schoolCode.unity.editorToken'),getPort:()=>vscode.workspace.getConfiguration('schoolCode').get('unityEditorPort',18777)});
+  async function unityEditorPort(){
+    const project=projectContext.project?.path||vscode.workspace.workspaceFolders?.find(f=>f.uri.scheme==='file')?.uri.fsPath;
+    if(project){
+      const normalized=path.resolve(project).replace(/\\/g,'/').toLowerCase();
+      const digest=createHash('sha256').update(normalized).digest('hex');
+      try{
+        const value=(await fs.readFile(path.join(os.homedir(),'.school-code','unity-editor-ports',`${digest}.port`),'utf8')).trim();
+        const port=Number(value);if(Number.isInteger(port)&&port>=1024&&port<=65535)return port;
+      }catch{/* Unity may not have started or written its project port yet. */}
+    }
+    return vscode.workspace.getConfiguration('schoolCode').get('unityEditorPort',18777);
+  }
+  const unityEditor=new UnityEditorClient({getToken:()=>context.secrets.get('schoolCode.unity.editorToken'),getPort:unityEditorPort});
   const taskManager=new TaskManager();
   const post=m=>view?.webview.postMessage(m);
   const save=async()=>{sessionStore.update(state);await sessionStore.save();};
@@ -333,14 +345,102 @@ function activate(context){
     if(!custom)return null;
     try{const normalized=new URL(custom).origin;await context.globalState?.update?.('schoolCode.relayUrl',normalized);try{if(typeof config.update==='function')await config.update('relayUrl',normalized,vscode.ConfigurationTarget?.Global??true);}catch{/* Older installations may not have the setting registered. */}return normalized;}catch{throw Error('사용자 지정 중계 주소가 올바르지 않습니다.');}
   }
-  async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50');agents=[...new Map([...(own.items||[]),...(pub.items||[])].map(a=>[a.id,{id:a.id,name:a.name}])).values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
-  async function send(data){if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
+  function normalizeAgent(agent){
+    if(!agent||typeof agent!=='object')return null;
+    const id=String(agent.id||agent.agent_id||'');if(!/^[\w-]{1,100}$/.test(id))return null;
+    const workflow=agent.has_workflow===true||agent.is_workflow===true||agent.type==='workflow'||agent.kind==='workflow'||typeof agent.workflow_id==='string'||(agent.workflow&&typeof agent.workflow==='object');
+    return {id,name:String(agent.name||agent.display_name||id).slice(0,200),description:typeof agent.description==='string'?agent.description.slice(0,500):'',has_workflow:workflow||agent.has_workflow===false};
+  }
+  function agentUsesWorkflow(agent){return agent?.has_workflow===true||agent?.is_workflow===true||agent?.type==='workflow'||agent?.kind==='workflow'||typeof agent.workflow_id==='string'||(agent.workflow&&typeof agent.workflow==='object');}
+  async function resolveAgent(id){
+    const current=agents.find(item=>item.id===id);if(!current)return null;
+    if(current.has_workflow!==undefined)return current;
+    try{const detail=normalizeAgent(await bridge.request(`/agents/${encodeURIComponent(id)}`));if(detail){const merged={...current,...detail};agents=agents.map(item=>item.id===id?merged:item);return merged;}}catch{/* Listing metadata is enough for the regular chat fallback. */}
+    return current;
+  }
+  async function refresh(){await ready;if(bridgeError)throw Error(bridgeError);const r=await bridge.request('/models');models=r.items||[];snapshot();try{const own=await bridge.request('/agents?limit=50'),pub=await bridge.request('/agents/public?limit=50'),merged=new Map();for(const item of [...(own.items||[]),...(pub.items||[])]){const agent=normalizeAgent(item);if(!agent)continue;const previous=merged.get(agent.id);merged.set(agent.id,previous?{...previous,...agent,has_workflow:previous.has_workflow===true||agent.has_workflow===true?true:agent.has_workflow??previous.has_workflow}:agent);}agents=[...merged.values()];}catch{post({type:'notice',text:'모델을 불러왔습니다. 에이전트 목록 조회는 실패했습니다.'});}snapshot();}
+  function workflowHistory(){
+    const previous=state.messages.slice(0,Math.max(0,state.messages.length-2)).filter(item=>item.role==='user'||item.role==='assistant'&&item.text).slice(-10);
+    if(!previous.length)return '';
+    return previous.map(item=>`${item.role==='user'?'사용자':'학교 AI'}:\n${String(item.text||'').slice(-12000)}`).join('\n\n');
+  }
+  function goalPrompt(){
+    if(!state.goal?.text||state.goal.status==='completed')return '';
+    return `\n\n[현재 작업 목표]\n${state.goal.text}\n이 목표를 기준으로 현재 요청을 처리하고, 목표 달성에 필요한 다음 작업과 검증 결과를 함께 제시하세요.`;
+  }
+  async function setGoal(text){
+    const clean=String(text||'').trim().slice(0,1000);
+    if(!clean)throw Error('작업 목표를 입력하세요.');
+    const now=Date.now();
+    state.goal={text:clean,status:'active',createdAt:state.goal?.createdAt||now,updatedAt:now};
+    await save();snapshot();post({type:'notice',text:`작업 목표를 설정했습니다: ${clean}`});
+  }
+  async function clearGoal(){
+    state.goal=null;await save();snapshot();post({type:'notice',text:'작업 목표를 지웠습니다.'});
+  }
+  async function goalCommand(raw){
+    const command=String(raw||'').replace(/^\/goal\b/i,'').trim();
+    const lower=command.toLowerCase();
+    if(lower==='status'||lower==='상태'){
+      const text=state.goal?.text?(state.goal.status==='completed'?`완료된 목표: ${state.goal.text}`:`현재 목표: ${state.goal.text}`):'설정된 작업 목표가 없습니다.';
+      post({type:'notice',text});post({type:'accepted'});return;
+    }
+    if(lower==='done'||lower==='완료'){
+      if(!state.goal?.text)throw Error('완료 처리할 작업 목표가 없습니다.');
+      state.goal={...state.goal,status:'completed',updatedAt:Date.now()};await save();snapshot();post({type:'notice',text:`작업 목표를 완료 처리했습니다: ${state.goal.text}`});post({type:'accepted'});return;
+    }
+    if(lower==='clear'||lower==='지우기'||lower==='삭제'){await clearGoal();post({type:'accepted'});return;}
+    if(!command){
+      const value=await vscode.window.showInputBox({title:'작업 목표 설정',prompt:'이번 작업에서 끝내고 싶은 결과를 입력하세요. (최대 1,000자)',value:state.goal?.text||'',ignoreFocusOut:true});
+      if(value===undefined)return;await setGoal(value);post({type:'accepted'});return;
+    }
+    await setGoal(command);post({type:'accepted'});
+  }
+  function workflowEventText(event){
+    if(!event||typeof event!=='object')return '';
+    const candidates=[event.content,event.delta,event.text,event.token,event.output,event.result,event.message,event.data];
+    for(const value of candidates){
+      if(typeof value==='string')return value;
+      if(value&&typeof value==='object'){for(const key of ['content','text','delta','output','message'])if(typeof value[key]==='string')return value[key];}
+    }
+    return '';
+  }
+  function workflowNodeLabel(event){
+    const value=event?.node_name||event?.node_id||event?.node||event?.step||event?.name||'';
+    return typeof value==='string'&&value.trim()?value.trim().slice(0,120):'워크플로우 단계';
+  }
+  async function sendWorkflow(agent,composed,answer,compacted,summaryPrefix,attachments=[]){
+    const history=workflowHistory();
+    const inputText=history?`[이전 대화]\n${history}\n\n[현재 프로젝트와 요청]\n${composed}`:composed;
+    const body={input_text:inputText,stream:true};
+    if(attachments.length){body.file_ids=attachments.map(item=>item.file_id);body.file_attachments=attachments;}
+    const steps=[];let done=false,lastNodeText='';
+    const parser=new SSEParser(event=>{
+      const type=String(event.type||'').toLowerCase();
+      if(event.conversation_id&&/^[\w-]{1,100}$/.test(String(event.conversation_id)))state.conversationId=String(event.conversation_id);
+      if(type==='run_start'){answer.status='워크플로우 시작';steps.push({type,status:'워크플로우 시작'});post({type:'stream',text:answer.text,status:answer.status,steps});return;}
+      if(type==='token'){const text=workflowEventText(event);if(text)answer.text+=text;answer.status='LLM 실행 중';post({type:'stream',text:answer.text,status:answer.status,steps});return;}
+      if(type==='node_output'){
+        const text=workflowEventText(event);if(text)lastNodeText=text;
+        const label=workflowNodeLabel(event);steps.push({type:'node_output',label,status:'단계 완료'});answer.status=/(mcp|tool)/i.test(label)?'MCP 도구 실행 중':'단계 완료';post({type:'stream',text:answer.text,status:answer.status,steps});return;
+      }
+      if(type==='node_error'){const detail=workflowEventText(event)||'워크플로우 단계에서 오류가 발생했습니다.';steps.push({type:'node_error',label:workflowNodeLabel(event),status:'오류',detail});throw Error(detail.slice(0,300));}
+      if(type==='run_error'){throw Error((workflowEventText(event)||'워크플로우 실행에 실패했습니다.').slice(0,300));}
+      if(type==='run_end'){
+        const text=workflowEventText(event);if(!answer.text)answer.text=text||lastNodeText;
+        answer.status='완료';answer.model=event.model_id||event.model;answer.finish_reason=event.finish_reason;answer.runId=event.run_id||event.runId;answer.attachments=cleanAttachments(event.attachments);done=true;steps.push({type:'run_end',status:'완료'});post({type:'stream',text:answer.text,status:answer.status,steps});
+      }
+    });
+    try{await bridge.request(`/agents/${encodeURIComponent(agent.id)}/workflow/run`,{method:'POST',body,onChunk:t=>parser.push(t),stream:true,signal:controller.signal});parser.end();if(!done)throw Error('워크플로우 응답이 중간에 종료되었습니다. 재전송은 자동으로 하지 않습니다.');answer.steps=steps;if(compacted||summaryPrefix)state.contextSummary='';await preloadAttachments(answer.attachments);}
+    catch(e){answer.status=e.message;answer.steps=steps;throw e;}
+  }
+  async function send(data){const rawMessage=String(data.message||'').trim();if(/^\/goal(?:\s|$)/i.test(rawMessage))return goalCommand(rawMessage);if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
     const requested=cleanAttachments(data.uploads).slice(0,MAX_UPLOADS),uploaded=[];const seen=new Set();
     for(const item of requested){if(seen.has(item.file_id))throw Error('같은 첨부 파일을 두 번 보낼 수 없습니다.');seen.add(item.file_id);const cached=uploadCache.get(item.file_id);if(!cached)throw Error('첨부 파일 업로드가 끝나지 않았거나 만료되었습니다. 다시 첨부하세요.');uploaded.push(cached);}
     let message=String(data.message||'');if(!message.trim()&&uploaded.length)message='첨부한 파일을 확인하고 필요한 내용을 설명해 주세요.';if(!message.trim())throw Error('질문을 입력하거나 파일을 첨부하세요.');
     let compacted=null;
     if(state.contextCompaction&&!state.contextSummary){const limit=compactThreshold(state.compactionThreshold);if(estimateMessages([...state.messages,{role:'user',text:message}])>limit)compacted=compactMessages(state.messages,Math.max(16000,limit-message.length));if(compacted){state.messages=compacted.messages;state.contextSummary=compacted.summary;state.conversationId=null;post({type:'notice',text:`컨텍스트를 압축했습니다. 이전 메시지 ${compacted.removed}개를 요약하고 새 대화 맥락으로 이어갑니다.`});await save();snapshot();}}
-    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+message);const body=chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId,fileIds:uploaded.map(a=>a.file_id),fileAttachments:uploaded},models);
+    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+goalPrompt()+message);const selectedAgent=data.agent?await resolveAgent(String(data.agent)):null;const workflow=Boolean(selectedAgent&&agentUsesWorkflow(selectedAgent));const body=workflow?null:chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId,fileIds:uploaded.map(a=>a.file_id),fileAttachments:uploaded},models);
     const info=projectContext.info();
     state.model=data.model;state.agent=data.agent||'';state.mode=data.mode;if(state.title==='새 대화')state.title=message.replace(/\s+/g,' ').trim().slice(0,48)||'새 대화';state.messages.push({role:'user',text:message,attachments:uploaded,project:info.files.length?info.project?.name:undefined,contextFiles:info.files});projectContext.clear();const answer={role:'assistant',text:'',status:'응답 중'};state.messages.push(answer);
     controller=new AbortController();post({type:'accepted'});snapshot();void preloadAttachments(uploaded);let done=false;
@@ -351,7 +451,7 @@ function activate(context){
       if(event.type==='error')throw Error(String(event.content||event.error||'학교 응답 오류').slice(0,300));
       if(event.type==='done'){done=true;answer.status='완료';answer.model=event.model_id;answer.attachments=cleanAttachments(event.attachments);answer.finish_reason=event.finish_reason;if(!answer.text&&event.content)answer.text=event.content;if(compacted||summaryPrefix)state.contextSummary='';}
     });
-    try{await bridge.request('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 재전송은 자동으로 하지 않습니다.');await preloadAttachments(answer.attachments);}
+    try{if(workflow){await sendWorkflow(selectedAgent,composed,answer,compacted,summaryPrefix,uploaded);}else{await bridge.request('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 재전송은 자동으로 하지 않습니다.');await preloadAttachments(answer.attachments);}}
     catch(e){answer.status=e.message;}
     finally{controller=null;await save();snapshot();}
   }
@@ -417,7 +517,7 @@ function activate(context){
     if(job.name==='workspace_info'){
       const setup=await ensureStarterInstructions(root,ensureActive);const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
        const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
-       return {name:path.basename(root),tools:['list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
+       return {name:path.basename(root),tools:['create_directory','list_files','read_file','search_text','read_asset_metadata','read_instructions','read_skill','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','propose_edit'],write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000,shell_output_max_chars:2097152}};
     }
     if(notionTool){
       if(mcpRegistry.get('notion')?.enabled===false)throw Error('Notion MCP가 꺼져 있습니다.');
@@ -442,6 +542,11 @@ function activate(context){
     if(job.name==='task_cancel'){
       if(!await approval(`학교 AI가 백그라운드 셸 작업 ${args.task_id}를 취소하려 합니다.`,{write:true}))throw Error('사용자가 거절했습니다.');
       await ensureActive();return taskManager.cancel(args.task_id,root);
+    }
+    if(job.name==='create_directory'){
+      const relative=String(args.path||'');
+      if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트 안에 폴더를 생성하려 합니다.\n경로: ${relative}\n프로젝트 밖의 경로와 숨김·비밀 폴더는 허용되지 않습니다.`,{write:true}))throw Error('사용자가 거절했습니다.');
+      await ensureActive();return workspace.createDirectory(root,relative);
     }
     const unityTool=['unity_project_info','unity_run_tests','unity_build','unity_refresh_assets'].includes(job.name);
     if(unityTool){
@@ -578,6 +683,11 @@ function activate(context){
     if(m.type==='notionDisconnect')return await disconnectNotion();
     if(m.type==='unityConfigure')return await configureUnity();
     if(m.type==='unityEditorConfigure')return await configureUnityEditor();
+    if(m.type==='goalSet'){
+      const value=await vscode.window.showInputBox({title:'작업 목표 설정',prompt:'이번 작업에서 끝내고 싶은 결과를 입력하세요. (최대 1,000자)',value:state.goal?.text||'',ignoreFocusOut:true});
+      if(value!==undefined)await setGoal(value);return;
+    }
+    if(m.type==='goalClear')return await clearGoal();
     if(m.type==='send')return await send(m);
     if(m.type==='choices'&&!controller){state.model=String(m.model||'');state.agent=String(m.agent||'');state.mode=['default','fast','deep','direct'].includes(m.mode)?m.mode:'default';state.approvalMode=['ask','read','full'].includes(m.approvalMode)?m.approvalMode:'ask';state.contextCompaction=m.contextCompaction===true;state.compactionThreshold=compactThreshold(m.compactionThreshold);await save();snapshot();return;}
     if(m.type==='stop'){controller?.abort();return;}

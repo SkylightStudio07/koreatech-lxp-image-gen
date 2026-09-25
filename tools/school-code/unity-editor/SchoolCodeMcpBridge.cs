@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Security.Cryptography;
 using System.Threading;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -21,6 +22,7 @@ public static class SchoolCodeMcpBridge
     private const string TokenKey = "SchoolCode.McpBridgeToken";
     private const string PortKey = "SchoolCode.McpBridgePort";
     private const int DefaultPort = 18777;
+    private const int PortSearchCount = 64;
     private const int MaxBodyBytes = 1024 * 1024;
     private static readonly ConcurrentQueue<Pending> Queue = new ConcurrentQueue<Pending>();
     private static HttpListener listener;
@@ -93,6 +95,40 @@ public static class SchoolCodeMcpBridge
         return Path.Combine(home, ".school-code", "unity-editor-token");
     }
 
+    private static string PortFilePath(string projectRoot)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var normalized = projectRoot.Replace('\\', '/').ToLowerInvariant();
+        using (var sha = SHA256.Create())
+        {
+            var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(normalized));
+            var hex = BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+            return Path.Combine(home, ".school-code", "unity-editor-ports", hex + ".port");
+        }
+    }
+
+    private static void SavePort(string projectRoot, int selectedPort)
+    {
+        try
+        {
+            var file = PortFilePath(projectRoot);
+            Directory.CreateDirectory(Path.GetDirectoryName(file));
+            File.WriteAllText(file, selectedPort.ToString());
+        }
+        catch (Exception e) { Debug.LogWarning("School Code Unity Editor MCP port registry could not be saved: " + e.Message); }
+    }
+
+    private static int LoadRegisteredPort(string projectRoot)
+    {
+        try
+        {
+            var value = File.ReadAllText(PortFilePath(projectRoot)).Trim();
+            if (int.TryParse(value, out var registered) && registered >= 1024 && registered <= 65535) return registered;
+        }
+        catch { }
+        return 0;
+    }
+
     private static string LoadToken()
     {
         try
@@ -120,8 +156,10 @@ public static class SchoolCodeMcpBridge
             return;
         }
         if (listener != null && listener.IsListening) return;
-        port = EditorPrefs.GetInt(PortKey, DefaultPort);
-        if (port < 1024 || port > 65535) port = DefaultPort;
+        var projectRoot = Directory.GetParent(Application.dataPath).FullName;
+        var preferredPort = LoadRegisteredPort(projectRoot);
+        if (preferredPort == 0) preferredPort = EditorPrefs.GetInt(PortKey, DefaultPort);
+        if (preferredPort < 1024 || preferredPort > 65535) preferredPort = DefaultPort;
         token = LoadToken();
         if (string.IsNullOrEmpty(token))
         {
@@ -129,20 +167,33 @@ public static class SchoolCodeMcpBridge
             EditorPrefs.SetString(TokenKey, token);
             Debug.Log("School Code Unity Editor MCP token created. Use School Code/MCP Bridge/Copy Token.");
         }
-        listener = new HttpListener();
-        listener.Prefixes.Add("http://127.0.0.1:" + port + "/");
-        try
+        Exception lastError = null;
+        for (var offset = 0; offset < PortSearchCount; offset++)
         {
-            listener.Start();
-            listenerThread = new Thread(ListenLoop) { IsBackground = true, Name = "SchoolCodeMcpBridge" };
-            listenerThread.Start();
-            Debug.Log("School Code Unity Editor MCP bridge listening on http://127.0.0.1:" + port + "/mcp");
+            var candidate = preferredPort + offset;
+            if (candidate > 65535) break;
+            var candidateListener = new HttpListener();
+            candidateListener.Prefixes.Add("http://127.0.0.1:" + candidate + "/");
+            try
+            {
+                candidateListener.Start();
+                listener = candidateListener;
+                port = candidate;
+                EditorPrefs.SetInt(PortKey, port);
+                SavePort(projectRoot, port);
+                listenerThread = new Thread(ListenLoop) { IsBackground = true, Name = "SchoolCodeMcpBridge" };
+                listenerThread.Start();
+                Debug.Log("School Code Unity Editor MCP bridge listening on http://127.0.0.1:" + port + "/mcp");
+                return;
+            }
+            catch (Exception e)
+            {
+                lastError = e;
+                try { candidateListener.Close(); } catch { }
+            }
         }
-        catch (Exception e)
-        {
-            listener = null;
-            Debug.LogError("School Code Unity Editor MCP bridge failed to start: " + e.Message);
-        }
+        listener = null;
+        Debug.LogError("School Code Unity Editor MCP bridge failed to start: " + (lastError == null ? "사용 가능한 포트를 찾지 못했습니다." : lastError.Message) + " (18777부터 64개 포트를 확인했습니다.)");
     }
 
     [MenuItem("School Code/MCP Bridge/Stop")]

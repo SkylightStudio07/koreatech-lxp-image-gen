@@ -21,4 +21,8 @@ test('bundled Unity bridge auto-starts and reads the per-user token file',()=>{
   assert.match(source,/if \(Application\.isBatchMode\)[\s\S]*bridge skipped in batch mode/);
   assert.match(source,/Environment\.SpecialFolder\.UserProfile/);
   assert.match(source,/unity-editor-token/);
+  assert.match(source,/PortSearchCount\s*=\s*64/);
+  assert.match(source,/unity-editor-ports/);
+  assert.match(source,/SavePort\(projectRoot, port\)/);
+  assert.match(source,/candidateListener\.Start\(\)/);
 });

@@ -14,13 +14,15 @@ const {RelayAuthStore,encodeCookie,pairingPage}=require('./auth.cjs');
 
 
 
-const MUTATING_TOOLS=new Set(['propose_edit','run_shell','start_background_task','task_cancel','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene']);
+const MUTATING_TOOLS=new Set(['create_directory','propose_edit','run_shell','start_background_task','task_cancel','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene']);
 
 
 
 const toolDefinitions={
 
   workspace_info:{description:'Get the connected VS Code project name, available tools, instruction files and safety limits. Requires a connected worker. When no recognized instruction file exists, the School Code extension automatically prepares a starter root AGENTS.md, shows a VS Code diff, and follows the current write-approval mode without overwriting an existing instruction file.',schema:{}},
+
+  create_directory:{description:'Create a relative folder inside the connected VS Code project after explicit approval. Existing folders are left unchanged; paths outside the project, hidden/secrets directories, links and dot-paths are rejected.',schema:{path:z.string().min(1).max(1024)}},
 
   list_files:{description:'List files inside the connected workspace (excludes secrets, Git metadata, dependencies).',schema:{path:z.string().default(''),limit:z.number().int().min(1).max(500).default(200)}},
 

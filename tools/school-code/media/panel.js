@@ -11,7 +11,7 @@ const MAX_UPLOADS = 5;
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_UPLOAD_TOTAL = 64 * 1024 * 1024;
 
-for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'copyMcpAuth', 'relayRepair', 'new', 'sessionNew', 'sessionRename', 'selection', 'relay', 'disconnectRelay', 'stop']) {
+for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'copyMcpAuth', 'relayRepair', 'new', 'sessionNew', 'sessionRename', 'goalSet', 'goalClear', 'selection', 'relay', 'disconnectRelay', 'stop']) {
   $(type).addEventListener('click', () => vscode.postMessage({ type: type === 'new' ? 'sessionNew' : type }));
 }
 
@@ -202,12 +202,24 @@ function choices() {
   return { model: $('model').value, agent: $('agent').value, mode: $('mode').value, approvalMode: $('approvalMode').value, contextCompaction: $('contextCompaction').checked, compactionThreshold: Number($('compactionThreshold').value) };
 }
 
+function renderGoal(goal, busyState = false) {
+  const bar = $('goalBar'), text = $('goalText'), clear = $('goalClear');
+  if (!bar || !text) return;
+  const active = !!goal?.text;
+  bar.classList.toggle('completed', goal?.status === 'completed');
+  text.textContent = active ? goal.text + (goal.status === 'completed' ? ' · 완료' : '') : '설정되지 않음';
+  text.title = active ? goal.text : '';
+  if (clear) clear.disabled = busyState || !active;
+  $('goalSet').disabled = busyState;
+}
+
 function send() {
   const message = $('prompt').value.trim(), value = $('model').value || $('agent').value;
+  const localCommand = /^\/goal(?:\s|$)/i.test(message);
   const uploads = draftUploads.filter(item => item.status === 'ready' && item.file_id).map(item => ({ file_id: item.file_id, filename: item.filename, file_type: item.file_type, file_size: item.file_size || item.size }));
   if (draftUploads.some(item => item.status === 'uploading')) { localNotice('파일 업로드가 끝날 때까지 잠시 기다려 주세요.'); return; }
   if (draftUploads.some(item => item.status === 'failed')) { localNotice('업로드에 실패한 첨부 파일을 빼거나 다시 추가해 주세요.'); return; }
-  if ((!message && !uploads.length) || busy || !value) return;
+  if ((!message && !uploads.length) || busy || (!value && !localCommand)) return;
   vscode.postMessage({ type: 'send', message, uploads, ...choices() });
 }
 
@@ -317,6 +329,18 @@ function render() {
     const content = document.createElement('div'); content.className = 'content'; renderText(content, m.text); article.append(title, content);
     if (m.contextFiles?.length) { const info = document.createElement('small'); info.className = 'message-context'; info.textContent = (m.project || '프로젝트') + ' · ' + m.contextFiles.map(f => f.path).join(', '); article.append(info); }
     if (m.status) { const status = document.createElement('small'); status.className = 'message-status'; status.textContent = m.status + (m.model ? ' · ' + m.model : ''); article.append(status); }
+    if (m.steps?.length) {
+      const timeline = document.createElement('ol'); timeline.className = 'message-steps';
+      for (const step of m.steps) {
+        const item = document.createElement('li');
+        const label = step.label || step.type || '워크플로우 단계';
+        item.textContent = `${label} · ${step.status || '진행'}`;
+        if (step.detail) item.title = step.detail;
+        if (step.type === 'node_error') item.className = 'error';
+        timeline.append(item);
+      }
+      article.append(timeline);
+    }
     if (m.attachments?.length) renderAttachments(article, m.attachments);
     main.append(article);
   }
@@ -325,18 +349,18 @@ function render() {
 
 window.addEventListener('message', ({ data: m }) => {
   if (m.type === 'state') {
-    models = m.models || []; agents = m.agents || []; messages = m.state.messages || []; busy = m.busy; connection(m); renderSessions(m); renderMcp(m);
+    models = m.models || []; agents = m.agents || []; messages = m.state.messages || []; busy = m.busy; connection(m); renderSessions(m); renderMcp(m); renderGoal(m.state.goal, busy);
     $('model').replaceChildren(); $('agent').replaceChildren();
     const modelPlaceholder = document.createElement('option'); modelPlaceholder.value = ''; modelPlaceholder.textContent = '모델을 선택하세요'; $('model').append(modelPlaceholder);
     for (const x of models.filter(x => x.available !== false)) { const option = document.createElement('option'); option.value = x.id; option.textContent = x.display_name || x.name || x.id; $('model').append(option); }
     const agentPlaceholder = document.createElement('option'); agentPlaceholder.value = ''; agentPlaceholder.textContent = '에이전트를 선택하세요'; $('agent').append(agentPlaceholder);
-    for (const x of agents) { const option = document.createElement('option'); option.value = x.id; option.textContent = x.name || x.id; $('agent').append(option); }
+    for (const x of agents) { const option = document.createElement('option'); option.value = x.id; option.textContent = (x.name || x.id) + (x.has_workflow ? ' · 워크플로우' : ''); $('agent').append(option); }
     $('model').value = m.state.model || ''; $('agent').value = m.state.agent || '';
     const hint = $('routingHint');
     if (hint) hint.textContent = m.state.agent ? '에이전트가 응답 모델과 도구를 결정합니다. 모델 선택은 보존되며 에이전트 해제 시 사용됩니다.' : m.state.model ? '선택한 모델로 직접 응답합니다.' : '모델과 에이전트를 각각 선택할 수 있습니다.';
     $('mode').value = m.state.mode; $('approvalMode').value = m.state.approvalMode || 'ask'; $('contextCompaction').checked = m.state.contextCompaction === true; $('compactionThreshold').value = String(m.state.compactionThreshold || 60000); $('compactionThreshold').disabled = !$('contextCompaction').checked || busy; $('mode').disabled = !!m.state.agent || busy; $('approvalMode').disabled = busy; $('contextCompaction').disabled = busy; $('model').disabled = busy; $('agent').disabled = busy; $('send').disabled = busy; $('new').disabled = busy; $('sessionNew').disabled = busy; $('sessionRename').disabled = busy; $('stop').hidden = !busy; uploadDropzone.classList.toggle('disabled', busy); uploadDropzone.setAttribute('aria-disabled', busy ? 'true' : 'false'); renderDraftUploads(); renderProject(m); render();
   }
-  if (m.type === 'stream') { const last = messages.at(-1); if (last?.role === 'assistant') { last.text = m.text; last.status = m.status; render(); } }
+  if (m.type === 'stream') { const last = messages.at(-1); if (last?.role === 'assistant') { last.text = m.text; last.status = m.status; last.steps = m.steps || last.steps; render(); } }
   if (m.type === 'attachmentPreviews') { attachmentPreviews = new Map((m.previews || []).map(p => [p.file_id, p])); render(); }
   if (m.type === 'connection') connection(m);
   if (m.type === 'selection') { $('prompt').value += m.text; $('prompt').focus(); }

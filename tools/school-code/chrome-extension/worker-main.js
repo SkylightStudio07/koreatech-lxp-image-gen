@@ -14,7 +14,7 @@ void (async function browserWorker(port,key) {
     current=new AbortController();let cancelBusy=false;
     const timer=setInterval(async()=>{if(cancelBusy)return;cancelBusy=true;try{const s=await local('/worker/status',{id:job.id});if(s.cancelled)current.abort();}catch{}finally{cancelBusy=false;}},1000);
     try{
-      const valid=job.method==='GET'&&(/^\/(models|usage\/remaining|agents\?limit=50|agents\/public\?limit=50)$/.test(job.route)||/^\/conversations\/[a-zA-Z0-9-]+\/messages$/.test(job.route)||/^\/chat\/uploads\/[a-zA-Z0-9-]+$/.test(job.route))||job.method==='POST'&&(job.route==='/chat/completions'||job.route==='/chat/upload');
+      const valid=job.method==='GET'&&(/^\/(models|usage\/remaining|agents\?limit=50|agents\/public\?limit=50)$/.test(job.route)||/^\/agents\/[a-zA-Z0-9_-]{1,100}$/.test(job.route)||/^\/conversations\/[a-zA-Z0-9-]+\/messages$/.test(job.route)||/^\/chat\/uploads\/[a-zA-Z0-9-]+$/.test(job.route))||job.method==='POST'&&(job.route==='/chat/completions'||job.route==='/chat/upload'||/^\/agents\/[a-zA-Z0-9_-]{1,100}\/workflow\/run$/.test(job.route));
       if(!valid)throw Error('허용되지 않은 경로');
       const h={'X-Client-Env':'production'};const csrf=document.cookie.split('; ').find(c=>c.startsWith('csrf_token='));if(csrf)h['X-CSRF-Token']=csrf.slice(11);
       let requestBody;

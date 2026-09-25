@@ -14,6 +14,23 @@ async function safePath(root,input,{directory=false,create=false}={}){
   }
   if(!parts.length&&!directory)throw Error('파일 경로를 지정하세요.');return target;
 }
+async function createDirectory(root,input){
+  if(typeof input!=='string'||!input.trim())throw Error('폴더 경로를 지정하세요.');
+  if(input.length>1024||/[\x00-\x1f:]/.test(input)||path.isAbsolute(input)||input.startsWith('\\'))throw Error('상대 경로만 허용됩니다.');
+  const parts=input.split(/[\\/]/).filter(Boolean);
+  if(!parts.length||parts.some(p=>p==='..'||p==='.'||p.startsWith('.')||DENIED.test(p)||/[. ]$/.test(p)))throw Error('차단된 경로입니다.');
+  root=await fs.realpath(root);let current=root,created=false;
+  for(const part of parts){
+    const next=path.join(current,part);let stat;
+    try{stat=await fs.lstat(next);}catch(e){
+      if(e.code!=='ENOENT')throw e;
+      await fs.mkdir(next);created=true;current=next;continue;
+    }
+    if(stat.isSymbolicLink()||!stat.isDirectory()||!relativeInside(root,await fs.realpath(next)))throw Error('링크 경로 또는 파일은 폴더로 사용할 수 없습니다.');
+    current=next;
+  }
+  return {path:input.replace(/\\/g,'/'),created};
+}
 const sha=s=>createHash('sha256').update(s).digest('hex');
 const MAX_TEXT_BYTES=16*1024*1024;
 async function readText(root,input){const p=await safePath(root,input);const s=await fs.stat(p);if(s.size>MAX_TEXT_BYTES)throw Error('텍스트 파일은 16 MiB 이하만 읽을 수 있습니다. 필요한 줄 범위를 좁혀 주세요.');const b=await fs.readFile(p);if(b.includes(0))throw Error('바이너리 파일은 지원하지 않습니다.');return {text:new TextDecoder('utf-8',{fatal:true}).decode(b),hash:sha(b)};}
@@ -43,4 +60,4 @@ async function readInstructions(root){
 async function listFiles(root,input='',limit=200,{excludeDirectories=new Set()}={}){const start=await safePath(root,input,{directory:true});const out=[];let visited=0;async function walk(dir){let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch(e){if(['EACCES','EPERM','ENOENT'].includes(e.code))return;throw e;}for(const e of entries){if(out.length>=limit||++visited>5000)return;if(DENIED.test(e.name)||e.isSymbolicLink()||e.isDirectory()&&excludeDirectories.has(e.name))continue;const p=path.join(dir,e.name),rel=path.relative(root,p).split(path.sep).join('/');if(e.isDirectory())await walk(p);else if(e.isFile())out.push(rel);}}await walk(start);return {files:out.sort(),truncated:out.length>=limit||visited>5000};}
 async function readLines(root,args){const r=await readText(root,args.path);const lines=r.text.split(/\r?\n/),start=args.start_line||1,end=args.end_line||300;if(end<start||end-start>1000)throw Error('한 번에 최대 1001줄을 읽을 수 있습니다.');return {path:args.path,sha256:r.hash,total_lines:lines.length,start_line:start,content:lines.slice(start-1,end).join('\n')};}
 async function search(root,args){if(typeof args.query!=='string'||!args.query||args.query.length>200)throw Error('검색어 오류');const listed=await listFiles(root,args.path||'',500);const matches=[];for(const file of listed.files){let r;try{r=await readText(root,file);}catch{continue;}let n=0;for(const line of r.text.split(/\r?\n/)){n++;if(line.includes(args.query)){matches.push({path:file,line:n,text:line.slice(0,500)});if(matches.length>=(args.limit||50))return {matches,truncated:true};}}}return {matches,truncated:listed.truncated};}
-module.exports={safePath,readText,readLines,listFiles,search,readAssetMetadata,readInstructions,sha};
+module.exports={safePath,createDirectory,readText,readLines,listFiles,search,readAssetMetadata,readInstructions,sha};

@@ -1,6 +1,6 @@
 const ORIGIN = 'https://ai.koreatech.ac.kr';
 function validRoute(route, method) {
-  return method === 'GET' && (/^\/(models|usage\/remaining|agents\?limit=50|agents\/public\?limit=50)$/.test(route) || /^\/conversations\/[a-zA-Z0-9-]+\/messages$/.test(route) || /^\/chat\/uploads\/[a-zA-Z0-9-]+$/.test(route)) || method === 'POST' && (route === '/chat/completions' || route === '/chat/upload');
+  return method === 'GET' && (/^\/(models|usage\/remaining|agents\?limit=50|agents\/public\?limit=50)$/.test(route) || /^\/agents\/[a-zA-Z0-9_-]{1,100}$/.test(route) || /^\/conversations\/[a-zA-Z0-9-]+\/messages$/.test(route) || /^\/chat\/uploads\/[a-zA-Z0-9-]+$/.test(route)) || method === 'POST' && (route === '/chat/completions' || route === '/chat/upload' || /^\/agents\/[a-zA-Z0-9_-]{1,100}\/workflow\/run$/.test(route));
 }
 function cleanFileAttachments(value) {
   if (value === undefined) return [];

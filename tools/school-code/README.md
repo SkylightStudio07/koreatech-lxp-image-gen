@@ -1,14 +1,14 @@
-# KOREATECH School Code — 0.13.6
+# KOREATECH School Code — 0.15.0
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
-일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.13.6.vsix`와 `school-code-connector-0.2.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
+일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.15.0.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
 
 > **공유 전 확인:** 기존에 동아리에서 사용하던 학교 AI MCP 서버는 권한이 있는 구성원에게 URL과 등록 정보를 공유해도 됩니다. School Code Workspace 릴레이는 이제 BCSD 계정 페어링을 통해 사용자·워크스페이스별 토큰과 워커 연결을 분리합니다. 기존 정적 `MCP_TOKEN`, `WORKER_TOKEN`도 호환되지만 새 설치에서는 브라우저 승인 방식을 권장합니다. 토큰, Notion 토큰, Unity Editor 토큰은 공개 저장소나 단체 채팅에 올리지 마세요.
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.13.6.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.15.0.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -21,11 +21,13 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 - **기본 / 빠른 / 깊은 / 다이렉트**를 학교 API의 `fast`, `deep`, `direct` 필드로 전달합니다. 빠른 모드의 최종 모델 라우팅은 학교 서버가 결정합니다. 학교 웹 UI는 빠른 모드 선택 시 모델도 자동 변경하지만 이 확장은 선택 모델을 유지합니다.
 - 깊은 응답은 `/models`의 고급 모델만 허용합니다. 에이전트는 기본 모드를 사용합니다.
 - 모델과 에이전트는 패널에서 별도 선택합니다. 두 값은 화면에 함께 보존되지만, 에이전트를 선택하면 학교 API가 에이전트의 모델·도구 설정을 우선 사용합니다. 에이전트를 비우면 선택해 둔 모델로 직접 응답합니다.
+- 워크플로우가 연결된 에이전트는 일반 채팅과 별도로 `/agents/{id}/workflow/run`을 사용합니다. 실행 중 `LLM 실행 중`, `MCP 도구 실행 중`, 단계 완료 상태가 표시되고, 완료된 단계 타임라인이 답변에 남습니다. 워크플로우 실행 중에는 일반 채팅으로 자동 재시도하지 않습니다.
 - **선택 코드**는 입력창에 추가되며, 전송 버튼을 누를 때 학교 AI로 전송됩니다.
 - 대화 ID를 유지하여 후속 질문을 이어갑니다. **＋**는 확장에 표시된 대화를 초기화합니다. 학교 서버의 기존 대화는 삭제하지 않습니다.
 - 대화 세션은 패널의 세션 목록에서 분리됩니다. 새 대화·이름 변경·삭제가 가능하며 세션마다 학교 대화 ID, 모델, 에이전트, 응답 모드와 도구 승인 설정을 따로 저장합니다.
 - 세션별 **컨텍스트 압축**을 선택할 수 있습니다. 켜면 약 3.2만·6만·9만자 기준을 넘을 때 오래된 대화를 로컬 요약으로 묶고 새 학교 대화 ID로 이어갑니다. 서버가 자동 압축을 지원하는지와 관계없이 이 세션에서만 확실하게 동작하며, 압축하지 않을 때는 기존 대화 ID를 그대로 유지합니다.
 - 도구 승인은 `매번 확인`, `읽기는 자동 승인 · 수정은 확인`, `모두 자동 승인` 중에서 세션별로 선택합니다. 기본값은 `매번 확인`이며, 자동 승인 모드에서도 프로젝트 루트·비밀 경로 제한은 유지됩니다.
+- 학교 Workspace 도구에는 `create_directory`가 포함됩니다. 상대 경로의 새 폴더와 중첩 폴더만 만들 수 있고, 프로젝트 밖 경로·숨김/비밀 경로·심볼릭 링크·기존 파일은 거부합니다. 폴더 생성은 파일 수정과 같은 쓰기 승인으로 처리됩니다.
 - 중단 시 브라우저가 진행 중인 요청을 취소합니다. 이미 학교 서버에서 처리된 이용량까지 취소되는 것은 아닙니다. 자동 재전송하지 않습니다.
 - 대화는 VS Code의 해당 작업 영역 로컬 상태에 최근 100개 메시지까지 저장됩니다.
 - 학교 AI가 이미지 생성 결과를 첨부하면 Chrome의 로그인 탭에서 `/chat/uploads/{file_id}`를 받아 대화 안에 PNG/JPEG/WebP/GIF/SVG 미리보기로 표시합니다. 이미지 본문은 세션 저장소에 저장하지 않고 현재 확장 실행 중인 메모리에만 보관합니다.
@@ -39,6 +41,19 @@ VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝�
 패널 상단에 **연결된 프로젝트**가 표시됩니다. 처음에는 VS Code에서 열린 로컬 프로젝트를 사용합니다. **변경**에서 열린 프로젝트 또는 다른 디렉터리를 선택할 수 있으며 선택은 이 VS Code 작업 영역에 기억됩니다. 프로젝트 전체를 대화에 업로드하지 않고, MCP 에이전트가 필요한 시점에 파일 목록·검색·줄 범위 읽기를 요청합니다.
 
 직접 파일 첨부는 MCP를 사용할 수 없는 일반 모델을 위한 보조 기능입니다.
+
+### 작업 목표(`/goal`)
+
+Codex처럼 세션마다 장기 작업 목표를 저장할 수 있습니다. 입력창에 다음 명령을 보내거나 채팅 화면의 **현재 작업 목표 → 설정**을 누르세요.
+
+```text
+/goal Unity 프로젝트의 플레이어 이동 버그를 수정하고 테스트까지 통과시키기
+/goal status   # 현재 목표 확인
+/goal done     # 목표 완료 처리
+/goal clear    # 목표 삭제
+```
+
+활성 목표는 다음 요청부터 모델과 워크플로우 에이전트에 함께 전달됩니다. 목표는 세션별로 저장되며 다른 세션으로 섞이지 않습니다. `/goal`만 입력하면 새 목표를 입력하는 창이 열립니다.
 
 1. **＋ 파일**에서 파일을 직접 고르거나, **＋ 폴더에서 선택**으로 폴더를 고른 뒤 첨부할 파일을 체크합니다.
 2. 입력창 위 첨부 목록에서 파일명과 글자 수를 확인합니다. 파일명을 누르면 **실제로 전송할 저장본**을 읽기 전용 편집기로 볼 수 있습니다. × 또는 모두 빼기로 제외할 수 있습니다.
@@ -89,7 +104,7 @@ Blender·Unreal MCP는 서버마다 인증·전송 방식이 다릅니다. 이 �
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.13.6.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.15.0.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
 Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 카탈로그의 버튼 이름도 `경로 설정`으로 표시됩니다. 이 단계는 `Unity.exe` 위치를 저장하는 것이며, 계속 실행 중인 MCP 서버를 만드는 과정이 아닙니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것도 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
 
@@ -241,7 +256,7 @@ Unity 공식 Skill이 요구하는 일반 CLI 작업은 아래 셸 하네스를 
 
 ### Unity Editor 실시간 브리지
 
-일반적으로는 **Unity Editor MCP → 자동 준비**를 누릅니다. 확장이 `Assets/Editor/SchoolCodeMcpBridge.cs`를 설치하고 사용자별 토큰을 만든 뒤 설정된 Unity 실행 파일로 프로젝트를 엽니다. Unity Hub/Editor 로그인이 끝나고 프로젝트가 로드되면 브리지가 자동으로 시작됩니다. 기본 loopback 포트는 `127.0.0.1:18777`이며 `schoolCode.unityEditorPort`와 Unity EditorPrefs 포트를 맞춰야 합니다. 수동으로 설치할 때만 Unity 메뉴의 **School Code → MCP Bridge → Start/Copy Token**을 사용하세요.
+일반적으로는 **Unity Editor MCP → 자동 준비**를 누릅니다. 확장이 `Assets/Editor/SchoolCodeMcpBridge.cs`를 설치하고 사용자별 토큰을 만든 뒤 설정된 Unity 실행 파일로 프로젝트를 엽니다. Unity Hub/Editor 로그인이 끝나고 프로젝트가 로드되면 브리지가 자동으로 시작됩니다. 기본 loopback 포트는 `127.0.0.1:18777`이고 이미 사용 중이면 `18778`부터 비어 있는 포트를 자동 선택합니다. 프로젝트별 선택 포트는 사용자 폴더의 `.school-code/unity-editor-ports`에 저장되어 확장이 자동으로 찾아갑니다. 수동으로 설치할 때만 Unity 메뉴의 **School Code → MCP Bridge → Start/Copy Token**을 사용하세요.
 
 브리지 도구는 `unity_open_scene`, `unity_find_gameobjects`, `unity_get_component`, `unity_set_component`, `unity_create_gameobject`, `unity_save_scene`입니다. loopback과 Bearer 토큰을 사용하고 C#·셸 명령을 실행하지 않습니다. 씬/오브젝트를 바꾸는 세 도구는 쓰기 승인 대상입니다. 자세한 설치는 `unity-editor/README.md`를 참고하세요.
 

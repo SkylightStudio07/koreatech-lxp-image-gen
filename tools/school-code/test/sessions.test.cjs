@@ -6,3 +6,13 @@ test('session store migrates legacy chat and keeps conversations isolated',async
   const fresh=store.create('새 프로젝트');assert.notEqual(fresh.id,old.id);assert.equal(store.active.id,fresh.id);fresh.messages.push({role:'user',text:'new'});await store.save();assert.equal(data.get('schoolCode.sessions').length,2);
   store.select(old.id);assert.equal(store.active.messages[0].text,'old');store.rename(old.id,'이전 세션');assert.equal(store.active.title,'이전 세션');store.remove(fresh.id);assert.equal(store.sessions.length,1);
 });
+
+test('session goals are normalized and stay isolated per session',async()=>{
+  const data=new Map([['schoolCode.sessions',[{id:'one',title:'첫 작업',goal:{text:'  버그 수정  ',status:'active',createdAt:10,updatedAt:10}} ,{id:'two',title:'둘째 작업'}]],['schoolCode.activeSession','one']]);
+  const storage={get:(k,d)=>data.has(k)?data.get(k):d,update:async(k,v)=>data.set(k,v)};
+  const store=new SessionStore(storage);
+  assert.deepEqual(store.active.goal,{text:'버그 수정',status:'active',createdAt:10,updatedAt:10});
+  store.create('새 세션');assert.equal(store.active.goal,null);
+  store.select('one');store.active.goal={text:'완료할 목표',status:'completed',createdAt:20,updatedAt:30};await store.save();
+  const saved=data.get('schoolCode.sessions').find(item=>item.id==='one');assert.equal(saved.goal.status,'completed');assert.equal(data.get('schoolCode.sessions').find(item=>item.id==='two').goal,null);
+});

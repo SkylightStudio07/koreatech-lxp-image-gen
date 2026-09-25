@@ -2,7 +2,7 @@
 
 학교 AI를 VS Code 안에서 사용하고, 현재 열어 둔 프로젝트를 학교 에이전트가 승인 기반으로 읽고 수정하도록 연결하는 도구입니다. 학교 로그인은 사용자의 Chrome 탭에서 처리하고, 프로젝트 파일과 명령 실행은 각 사용자의 PC에서 수행합니다.
 
-학교·Microsoft의 공식 확장이 아닙니다. 현재 배포 버전은 **School Code 0.13.6**, **Chrome Connector 0.2.0**입니다.
+학교·Microsoft의 공식 확장이 아닙니다. 현재 배포 버전은 **School Code 0.15.0**, **Chrome Connector 0.3.0**입니다.
 
 ## 무엇을 배포하는가
 
@@ -12,8 +12,8 @@
 
 | 파일 | 용도 |
 |---|---|
-| `school-code-0.13.6.vsix` | VS Code 확장 설치 |
-| `school-code-connector-0.2.0.zip` | Chrome Connector 설치 |
+| `school-code-0.15.0.vsix` | VS Code 확장 설치 |
+| `school-code-connector-0.3.0.zip` | Chrome Connector 설치 |
 | `SHA256SUMS.txt` | 다운로드 파일 무결성 확인 |
 
 VSIX 안에도 Connector 폴더가 들어 있지만, Chrome에서는 압축을 풀어 폴더를 직접 로드해야 하므로 ZIP을 별도 첨부합니다. Chrome Web Store와 VS Code Marketplace에 등록하지 않은 동안에는 Releases가 공식 배포 지점입니다. 릴리즈 페이지 링크는 저장소의 **Releases → 최신 릴리즈**에서 복사해 구성원에게 전달하세요.
@@ -22,13 +22,15 @@ VSIX 안에도 Connector 폴더가 들어 있지만, Chrome에서는 압축을 �
 
 프로젝트 파일을 에이전트에게 맡기지 않고 학교 AI와 대화만 하려면 MCP를 등록할 필요가 없습니다.
 
-1. 최신 릴리즈에서 `school-code-0.13.6.vsix`를 내려받습니다.
+1. 최신 릴리즈에서 `school-code-0.15.0.vsix`를 내려받습니다.
 2. VS Code의 `Ctrl+Shift+P` → **Extensions: Install from VSIX...**로 VSIX를 설치하고 **Developer: Reload Window**를 실행합니다.
-3. 최신 릴리즈의 `school-code-connector-0.2.0.zip`을 압축 해제합니다.
+3. 최신 릴리즈의 `school-code-connector-0.3.0.zip`을 압축 해제합니다.
 4. Chrome 주소창에서 `chrome://extensions`를 열고 **개발자 모드**를 켠 뒤 **압축해제된 확장 프로그램 로드**로 압축 해제한 폴더를 선택합니다.
 5. Chrome에서 학교 AI에 본인 계정으로 로그인한 탭을 열어 둡니다.
 6. VS Code에서 School Code 패널을 열고 **브라우저 연결**을 누릅니다.
 7. **모델·에이전트 새로고침** 후 대화를 시작합니다.
+
+채팅 입력창에서 `/goal 목표 내용`으로 세션 목표를 지정할 수 있습니다. `/goal status`, `/goal done`, `/goal clear`로 상태를 확인·완료·삭제합니다. 활성 목표는 다음 모델/워크플로우 요청에 함께 전달됩니다.
 
 학교 계정 쿠키와 대화 요청은 로그인 탭에서 처리됩니다. Connector를 설치했다고 학교 계정이 운영자 서버에 전달되는 것은 아닙니다. Chrome의 로컬 네트워크 권한 요청이 나오면 허용해야 합니다.
 
@@ -56,6 +58,8 @@ School Code의 카탈로그는 로컬 연결 정보를 저장하는 화면입니
 
 - **Notion**: 공개 링크를 등록하거나 각자 만든 Integration Secret을 입력합니다. Secret은 VS Code SecretStorage에만 저장합니다.
 - **Unity CLI**: Unity 프로젝트를 연결한 뒤 `Unity.exe` 경로를 설정합니다. EditMode/PlayMode 테스트와 빌드는 프로젝트 내부에서 승인 후 실행됩니다.
+- **워크플로우 에이전트**: 워크플로우가 연결된 학교 에이전트를 선택하면 일반 채팅 대신 서버의 단계형 실행 경로를 사용하고, LLM·MCP 단계와 완료 상태를 대화에 표시합니다.
+- **폴더 생성**: Workspace MCP의 `create_directory`가 상대 경로의 중첩 폴더 생성을 지원합니다. 프로젝트 밖·숨김/비밀 경로·심볼릭 링크는 차단되고 파일 수정과 같은 승인을 거칩니다.
 - **Unity Editor MCP**: **자동 준비**를 누르면 브리지 파일·로컬 토큰·Editor 실행을 준비합니다. Unity Hub/Editor 로그인과 프로젝트 로딩은 사용자 PC에서 한 번 확인합니다.
 - **Blender/Unreal/기타 HTTPS MCP**: 서버의 HTTPS `/mcp` 주소와 개인 Bearer 토큰을 입력하고, 학교 AI에도 같은 MCP를 등록합니다.
 
@@ -90,13 +94,13 @@ GitHub CLI에 로그인되어 있다면 다음처럼 소스 커밋과 릴리즈�
 
 ```powershell
 git add README.md forBCSD.md tools/school-code
-git commit -m "docs: publish School Code 0.13.6 release guide"
+git commit -m "docs: publish School Code 0.15.0 release guide"
 git push origin master
-gh release create v0.13.6 `
-  tools/school-code/school-code-0.13.6.vsix `
-  tools/school-code/school-code-connector-0.2.0.zip `
+gh release create v0.15.0 `
+  tools/school-code/school-code-0.15.0.vsix `
+  tools/school-code/school-code-connector-0.3.0.zip `
   tools/school-code/SHA256SUMS.txt `
-  --title "School Code 0.13.6" `
+  --title "School Code 0.15.0" `
   --notes-file forBCSD.md
 ```
 
