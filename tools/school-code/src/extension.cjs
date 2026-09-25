@@ -34,7 +34,7 @@ function activate(context){
   const output=vscode.window.createOutputChannel('School Code');context.subscriptions.push(output);
   const port=vscode.workspace.getConfiguration('schoolCode').get('bridgePort',18766);
   const bridge=new BrowserBridge(port);let bridgeError='';const ready=bridge.start().catch(e=>{bridgeError=e.code==='EADDRINUSE'?'브리지 포트가 사용 중입니다. 다른 VS Code 창을 닫거나 bridgePort를 변경하세요.':e.message;output.appendLine(bridgeError);});context.subscriptions.push({dispose:()=>bridge.dispose()});
-  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',relayPending=false,relayPairCode='',relayPairPromise=null,relayPairAbort=null,unityEditorConnected=false,projectBusy=false;
+  let view,models=[],agents=[],controller,relayController,relayRoot,relaySession,relayConnected=false,relayError='',relayPending=false,relayPairCode='',relayPairPromise=null,relayPairAbort=null,relayConnectPromise=null,browserConnectBusy=false,unityEditorConnected=false,projectBusy=false;
   const imagePreviews=new Map(),imageLoads=new Map();
   const uploadCache=new Map(),uploadControllers=new Map();
   const MAX_UPLOADS=5,MAX_UPLOAD_BYTES=32*1024*1024,MAX_UPLOAD_BASE64=45*1024*1024;
@@ -69,7 +69,7 @@ function activate(context){
       return {...item,configured,status,error:item.id==='school-workspace'?relayError:''};
     });
   }
-  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,relayPending,relayPairCode,relayError,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
+  function snapshot(){post({type:'state',state,models,agents,sessions:sessionStore.summaries(),activeSessionId:sessionStore.activeId,connected:bridge.connected,error:bridgeError,relay:relayConnected,relayPending,relayPairCode,relayError,relayBusy:!!relayConnectPromise||!!relayPairPromise||relayPending,browserBusy:browserConnectBusy,busy:!!controller,projectBusy,mcpCatalog:mcpSnapshot(),projectContext:projectContext.info()});}
   function cleanAttachments(value){
     const list=Array.isArray(value)?value:[];
     return list.map(a=>{
@@ -156,7 +156,12 @@ function activate(context){
     const found=new Map();for(const message of session?.messages||[])for(const a of cleanAttachments(message.attachments).filter(isImageAttachment))found.set(a.file_id,a);
     await preloadAttachments([...found.values()].slice(-20));
   }
-  async function connectBrowser(){await ready;if(bridgeError)throw Error(bridgeError);await vscode.env.openExternal(vscode.Uri.parse('https://ai.koreatech.ac.kr/AiCA/chat'));vscode.window.showInformationMessage('School Code Connector가 설치되어 있으면 자동 연결됩니다. 최초 설치: 확장 폴더 열기 → Chrome 확장 프로그램에서 압축해제된 확장 로드.');}
+  async function connectBrowser(){
+    if(browserConnectBusy){post({type:'notice',text:'브라우저 연결을 이미 여는 중입니다. 같은 버튼을 다시 누르지 않아도 됩니다.'});return;}
+    browserConnectBusy=true;snapshot();
+    try{await ready;if(bridgeError)throw Error(bridgeError);await vscode.env.openExternal(vscode.Uri.parse('https://ai.koreatech.ac.kr/AiCA/chat'));vscode.window.showInformationMessage('School Code Connector가 설치되어 있으면 자동 연결됩니다. 최초 설치: 확장 폴더 열기 → Chrome 확장 프로그램에서 압축해제된 확장 로드.');}
+    finally{setTimeout(()=>{browserConnectBusy=false;snapshot();},2000);}
+  }
   async function configureNotion(){
     const existing=await context.secrets.get('schoolCode.notion.integrationToken');
     const existingLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
@@ -514,7 +519,7 @@ function activate(context){
     const value=JSON.stringify({type:'bearer',token});if(!vscode.env?.clipboard?.writeText)throw Error('VS Code 클립보드를 사용할 수 없습니다.');await vscode.env.clipboard.writeText(value);await vscode.window.showInformationMessage('학교 MCP 인증 JSON을 클립보드에 복사했습니다. 학교 리소스 → MCP에 붙여 넣으세요.');
   }
   async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;relayPairAbort?.abort();relayPairAbort=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayPending=false;relayPairCode='';relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
-  async function connectRelay({forcePair=false,auto=false}={}){
+  async function connectRelayImpl({forcePair=false,auto=false}={}){
     if(relayPairPromise){
       output.appendLine(`이미 페어링 승인 대기 중입니다${relayPairCode?` (코드 ${relayPairCode})`:''}. 기존 요청을 계속 확인합니다.`);
       post({type:'notice',text:`이미 브라우저 승인 대기 중입니다${relayPairCode?` · 코드 ${relayPairCode}`:''}. 새 연결을 만들지 않고 기존 요청을 계속 확인합니다.`});
@@ -546,6 +551,15 @@ function activate(context){
       try{result=await executeTool(job,check,ensureActive);if(!check())throw Error('요청 만료');}catch(e){error=e.message;}finally{clearTimeout(expiry);}
       await call('/worker/result',{id:job.id,result,error}).catch(e=>output.appendLine(e.message));
      }catch(e){relayConnected=false;relayError=String(e.message||'중계 서버에 연결할 수 없습니다.').slice(0,200);snapshot();if(ctl.signal.aborted)break;output.appendLine(e.message);await new Promise(resolve=>{const onAbort=()=>{clearTimeout(t);resolve();};const t=setTimeout(()=>{ctl.signal.removeEventListener('abort',onAbort);resolve();},3000);ctl.signal.addEventListener('abort',onAbort,{once:true});});}}}catch(e){if(!ctl.signal.aborted){relayConnected=false;relayError=String(e.message||'중계 서버에 연결할 수 없습니다.').slice(0,200);output.appendLine(e.message);post({type:'notice',text:e.message});snapshot();}}finally{clearInterval(heartbeat);if(relayController===ctl){relayController=null;relayConnected=false;snapshot();}}})();
+  }
+  async function connectRelay(options={}){
+    if(relayConnectPromise){
+      output.appendLine('Workspace 연결이 이미 진행 중입니다. 기존 요청을 계속 사용합니다.');
+      post({type:'notice',text:'Workspace 연결이 이미 진행 중입니다. 새 탭이나 새 코드를 만들지 않고 기존 요청을 계속 확인합니다.'});
+      return relayConnectPromise;
+    }
+    const run=connectRelayImpl(options);relayConnectPromise=run;snapshot();
+    try{return await run;}finally{if(relayConnectPromise===run)relayConnectPromise=null;snapshot();}
   }
   async function handle(m){try{
     if(m.type==='ready'){snapshot();postImagePreviews();void hydrateAttachments(state);return;}

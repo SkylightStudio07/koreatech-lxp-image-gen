@@ -134,7 +134,7 @@ function renderMcp(m) {
     const status = document.createElement('span'); status.className = 'mcp-status' + (item.status === 'error' ? ' error' : '') + (item.status === 'pending' ? ' pending' : ''); status.textContent = mcpStatus(item.enabled === false ? 'disabled' : item.status);
     info.append(title, desc, status);
     const actions = document.createElement('div'); actions.className = 'mcp-actions';
-    const configure = document.createElement('button'); configure.textContent = item.id === 'unity-cli' ? '경로 설정' : item.id === 'unity-editor' ? '자동 준비' : item.configured ? '설정' : '연결'; configure.title = item.description; configure.disabled = !!m.busy; configure.addEventListener('click', () => vscode.postMessage({ type: 'mcpConfigure', id: item.id }));
+    const configure = document.createElement('button'); configure.textContent = item.id === 'unity-cli' ? '경로 설정' : item.id === 'unity-editor' ? '자동 준비' : item.configured ? '설정' : '연결'; configure.title = item.description; configure.disabled = !!m.busy || (item.id === 'school-workspace' && !!m.relayBusy); configure.addEventListener('click', () => vscode.postMessage({ type: 'mcpConfigure', id: item.id }));
     actions.append(configure);
     if (item.configured) {
       const toggle = document.createElement('button'); toggle.textContent = item.enabled === false ? '켜기' : '끄기'; toggle.disabled = !!m.busy; toggle.addEventListener('click', () => vscode.postMessage({ type: 'mcpToggle', id: item.id, enabled: item.enabled === false })); actions.append(toggle);
@@ -229,6 +229,12 @@ $('compactionThreshold').addEventListener('change', () => vscode.postMessage({ t
 function connection(m) {
   $('dot').className = m.connected ? 'online' : '';
   $('connection').textContent = m.error || (m.connected ? '학교 브라우저 연결됨' : '브라우저 연결 대기');
+  const browserConnect = $('connect');
+  if (browserConnect) { browserConnect.disabled = !!m.browserBusy; browserConnect.textContent = m.browserBusy ? '연결 여는 중…' : '브라우저 연결'; }
+  const relayButton = $('relay');
+  if (relayButton) { relayButton.disabled = !!m.relayBusy; relayButton.textContent = m.relayBusy ? 'Workspace 연결 중…' : 'Workspace 연결 / 재연결'; }
+  const relayRepair = $('relayRepair');
+  if (relayRepair) relayRepair.disabled = !!m.relayBusy;
   const sessionConnection = $('sessionConnection');
   if (sessionConnection) sessionConnection.textContent = m.error || (m.connected ? '학교 브라우저 연결됨' : '브라우저 연결 대기');
   const sessionConnect = $('sessionConnect');
