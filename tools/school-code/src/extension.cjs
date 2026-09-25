@@ -423,6 +423,25 @@ function activate(context){
     const value=event?.node_name||event?.node_id||event?.node||event?.step||event?.name||'';
     return typeof value==='string'&&value.trim()?value.trim().slice(0,120):'워크플로우 단계';
   }
+  const SCHOOL_REQUEST_RETRIES=3;
+  function retryableSchoolError(error){
+    const message=String(error?.message||error||'');
+    return /학교 요청 실패|fetch failed|network|ECONNRESET|ECONNREFUSED|ETIMEDOUT|HTTP 5\d\d/i.test(message);
+  }
+  async function requestSchool(route,options={},onRetry){
+    let attempt=0;
+    while(true){
+      let received=false;
+      try{
+        return await bridge.request(route,{...options,onChunk:chunk=>{received=true;options.onChunk?.(chunk);}});
+      }catch(error){
+        if(received||attempt>=SCHOOL_REQUEST_RETRIES||!retryableSchoolError(error))throw error;
+        attempt++;onRetry?.(attempt,SCHOOL_REQUEST_RETRIES);
+        const delay=1000*2**(attempt-1),signal=options.signal;
+        await new Promise((resolve,reject)=>{if(signal?.aborted)return reject(Error('중단됨'));const timer=setTimeout(resolve,delay);signal?.addEventListener('abort',()=>{clearTimeout(timer);reject(Error('중단됨'));},{once:true});});
+      }
+    }
+  }
   async function sendWorkflow(agent,composed,answer,compacted,summaryPrefix,attachments=[]){
     const history=workflowHistory();
     const inputText=history?`[이전 대화]\n${history}\n\n[현재 프로젝트와 요청]\n${composed}`:composed;
@@ -447,7 +466,7 @@ function activate(context){
         answer.status='완료';answer.model=event.model_id||event.model;answer.finish_reason=event.finish_reason;answer.runId=event.run_id||event.runId;answer.attachments=cleanAttachments(event.attachments);done=true;steps.push({type:'run_end',status:'완료'});post({type:'stream',text:answer.text,status:answer.status,steps});
       }
     });
-    try{await bridge.request(`/agents/${encodeURIComponent(agent.id)}/workflow/run`,{method:'POST',body,onChunk:t=>parser.push(t),stream:true,signal:controller.signal});parser.end();if(!done)throw Error('워크플로우 응답이 중간에 종료되었습니다. 재전송은 자동으로 하지 않습니다.');answer.steps=steps;if(compacted||summaryPrefix)state.contextSummary='';await preloadAttachments(answer.attachments);}
+    try{await requestSchool(`/agents/${encodeURIComponent(agent.id)}/workflow/run`,{method:'POST',body,onChunk:t=>parser.push(t),stream:true,signal:controller.signal},(attempt,total)=>{answer.status=`학교 요청 재시도 중… (${attempt}/${total})`;post({type:'stream',text:answer.text,status:answer.status,steps});});parser.end();if(!done)throw Error('워크플로우 응답이 중간에 종료되었습니다. 자동 재시도 횟수를 초과했습니다.');answer.steps=steps;if(compacted||summaryPrefix)state.contextSummary='';await preloadAttachments(answer.attachments);}
     catch(e){answer.status=e.message;answer.steps=steps;throw e;}
   }
   async function send(data){const rawMessage=String(data.message||'').trim();if(/^\/goal(?:\s|$)/i.test(rawMessage))return goalCommand(rawMessage);if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
@@ -467,7 +486,7 @@ function activate(context){
       if(event.type==='error')throw Error(String(event.content||event.error||'학교 응답 오류').slice(0,300));
       if(event.type==='done'){done=true;answer.status='완료';answer.model=event.model_id;answer.attachments=cleanAttachments(event.attachments);answer.finish_reason=event.finish_reason;if(!answer.text&&event.content)answer.text=event.content;if(compacted||summaryPrefix)state.contextSummary='';}
     });
-    try{if(workflow){await sendWorkflow(selectedAgent,composed,answer,compacted,summaryPrefix,uploaded);}else{await bridge.request('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 재전송은 자동으로 하지 않습니다.');await preloadAttachments(answer.attachments);}}
+    try{if(workflow){await sendWorkflow(selectedAgent,composed,answer,compacted,summaryPrefix,uploaded);}else{await requestSchool('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal},(attempt,total)=>{answer.status=`학교 요청 재시도 중… (${attempt}/${total})`;post({type:'stream',text:answer.text,status:answer.status});});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 자동 재시도 횟수를 초과했습니다.');await preloadAttachments(answer.attachments);}}
     catch(e){answer.status=e.message;}
     finally{controller=null;await save();snapshot();}
   }
