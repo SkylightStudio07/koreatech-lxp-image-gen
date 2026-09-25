@@ -775,21 +775,22 @@ function activate(context){
     const project=await projectContext.ensure(),raw=await chooseRelayUrl();if(!raw)return;const u=new URL(raw),{mcpKey}=relayPairKeys(u.origin,project),token=await context.secrets.get(mcpKey);if(!token)throw Error('먼저 BCSD 계정으로 Workspace를 연결하세요.');
     const value=JSON.stringify({type:'bearer',token});if(!vscode.env?.clipboard?.writeText)throw Error('VS Code 클립보드를 사용할 수 없습니다.');await vscode.env.clipboard.writeText(value);await vscode.window.showInformationMessage('학교 MCP 인증 JSON을 클립보드에 복사했습니다. 학교 리소스 → MCP에 붙여 넣으세요.');
   }
-  async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;relayPairAbort?.abort();relayPairAbort=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayPending=false;relayPairCode='';relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)}).catch(()=>{});}snapshot();}
-  async function connectRelayImpl({forcePair=false,auto=false}={}){
+  async function disconnectRelay(){const previousRoot=relayRoot;relayController?.abort();relayController=null;relayPairAbort?.abort();relayPairAbort=null;if(previousRoot)await taskManager.cancelRoot(previousRoot);relayRoot=null;relayConnected=false;relayPending=false;relayPairCode='';relayError='';if(relaySession){const {url,headers}=relaySession;relaySession=null;try{await fetch(url+'/worker/disconnect',{method:'POST',headers,signal:AbortSignal.timeout(3000)});}catch{/* The relay may already be offline. */}}snapshot();}
+  async function connectRelayImpl({forcePair=false,auto=false,reconnect=false}={}){
     if(relayPairPromise){
       output.appendLine(`이미 페어링 승인 대기 중입니다${relayPairCode?` (코드 ${relayPairCode})`:''}. 기존 요청을 계속 확인합니다.`);
       post({type:'notice',text:`이미 브라우저 승인 대기 중입니다${relayPairCode?` · 코드 ${relayPairCode}`:''}. 새 연결을 만들지 않고 기존 요청을 계속 확인합니다.`});
       return relayPairPromise;
     }
+    const previousRelayUrl=relaySession?.url||'';
     if(relayController){
-      if(auto||relayConnected)return vscode.window.showInformationMessage('이미 연결되어 있습니다.');
+      if(auto||(!reconnect&&!forcePair&&relayConnected))return vscode.window.showInformationMessage('이미 연결되어 있습니다.');
       output.appendLine('기존에 실패한 Workspace 연결을 정리하고 다시 시도합니다.');
       await disconnectRelay();
     }
     if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역이 필요합니다.');
     const project=await projectContext.ensure();relayError='';snapshot();
-    const raw=auto?configuredRelayUrl():await chooseRelayUrl();if(!raw)return;
+    const raw=auto?configuredRelayUrl():(reconnect&&previousRelayUrl?previousRelayUrl:await chooseRelayUrl());if(!raw)return;
     const u=new URL(raw);if(u.username||u.password||u.search||u.hash||u.pathname!=='/'||!(u.protocol==='https:'||u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname)))throw Error('HTTPS 서버 기본 주소를 입력하세요.');const url=u.origin;
     const key='relay:'+url;let token=await context.secrets.get(key),mcpToken=await context.secrets.get(`${key}:mcp`);let pairMode=typeof vscode.window.showQuickPick==='function';
     if(auto){if(!token||token.length<32)return;pairMode=false;}
@@ -849,13 +850,13 @@ function activate(context){
     if(m.type==='selection'){
       const editor=vscode.window.activeTextEditor;if(!editor||editor.selection.isEmpty)throw Error('편집기에서 코드를 선택하세요.');const text=editor.document.getText(editor.selection);if(text.length>40000)throw Error('선택 코드는 40,000자 이하여야 합니다.');post({type:'selection',text:`\n\n파일: ${vscode.workspace.asRelativePath(editor.document.uri)}\n\`\`\`${editor.document.languageId}\n${text}\n\`\`\``});return;
     }
-    if(m.type==='relay')return await connectRelay();
-    if(m.type==='relayRepair')return await connectRelay({forcePair:true});
+    if(m.type==='relay')return await connectRelay({reconnect:true});
+    if(m.type==='relayRepair')return await connectRelay({forcePair:true,reconnect:true});
     if(m.type==='copyMcpAuth')return await copyMcpAuth();
     if(m.type==='disconnectRelay')return await disconnectRelay();
   }catch(e){const message=String(e?.message||e||'알 수 없는 오류').slice(0,300);output.appendLine(`오류: ${message}`);if(m?.type==='relay'||m?.type==='relayRepair'){relayConnected=false;relayError=message;snapshot();}post({type:'notice',text:message});vscode.window.showErrorMessage('School Code: '+message);}}
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('schoolCode.chat',{resolveWebviewView(v){view=v;v.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};const nonce=randomBytes(16).toString('hex');v.webview.html=panelHtml(v.webview,context.extensionUri,nonce);v.webview.onDidReceiveMessage(handle,undefined,context.subscriptions);v.onDidDispose(()=>{view=null;});}},{webviewOptions:{retainContextWhenHidden:true}}));
-  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':connectRelay,'schoolCode.repairRelay':()=>connectRelay({forcePair:true}),'schoolCode.copyMcpAuth':copyMcpAuth,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor,'schoolCode.gitConfigure':configureGit}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
+  for(const [command,fn]of Object.entries({'schoolCode.open':()=>vscode.commands.executeCommand('schoolCode.chat.focus'),'schoolCode.connect':connectBrowser,'schoolCode.relay':()=>connectRelay({reconnect:true}),'schoolCode.repairRelay':()=>connectRelay({forcePair:true,reconnect:true}),'schoolCode.copyMcpAuth':copyMcpAuth,'schoolCode.disconnectRelay':disconnectRelay,'schoolCode.mcpCatalog':chooseMcp,'schoolCode.mcpAdd':chooseMcp,'schoolCode.openMcpCatalog':openMcpCatalogSite,'schoolCode.notionConfigure':configureNotion,'schoolCode.notionDisconnect':disconnectNotion,'schoolCode.unityConfigure':configureUnity,'schoolCode.unityEditorConfigure':configureUnityEditor,'schoolCode.gitConfigure':configureGit}))context.subscriptions.push(vscode.commands.registerCommand(command,()=>Promise.resolve(fn()).catch(e=>vscode.window.showErrorMessage(e.message))));
   const timer=setInterval(()=>post({type:'connection',connected:bridge.connected,relay:relayConnected,error:bridgeError}),3000);context.subscriptions.push({dispose(){clearInterval(timer);controller?.abort();for(const c of uploadControllers.values())c.abort();uploadControllers.clear();void disconnectRelay();void taskManager.dispose();}});
   async function autoReconnectRelay(){
     if(!vscode.workspace.isTrusted||!vscode.workspace.workspaceFolders?.length)return;
