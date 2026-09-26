@@ -16,3 +16,7 @@ test('session goals are normalized and stay isolated per session',async()=>{
   store.select('one');store.active.goal={text:'완료할 목표',status:'completed',createdAt:20,updatedAt:30};await store.save();
   const saved=data.get('schoolCode.sessions').find(item=>item.id==='one');assert.equal(saved.goal.status,'completed');assert.equal(data.get('schoolCode.sessions').find(item=>item.id==='two').goal,null);
 });
+
+test('sessions support plans, duplication and portable export',()=>{
+  const storage={get:()=>undefined,update:async()=>{}};const store=new SessionStore(storage);store.setPlan(store.active.id,['조사','검증']);const copy=store.duplicate(store.active.id);assert.equal(copy.plan.length,2);assert.equal(copy.conversationId,null);assert.equal(store.export(copy.id).title,copy.title);const imported=store.import({title:'외부 세션',messages:[{role:'user',text:'hello'}]});assert.equal(imported.length,1);assert.equal(store.active.title,'외부 세션');
+});

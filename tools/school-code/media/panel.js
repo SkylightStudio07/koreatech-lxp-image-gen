@@ -11,7 +11,7 @@ const MAX_UPLOADS = 5;
 const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_UPLOAD_TOTAL = 64 * 1024 * 1024;
 
-for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'copyMcpAuth', 'relayRepair', 'new', 'sessionNew', 'sessionRename', 'goalSet', 'goalClear', 'selection', 'relay', 'disconnectRelay', 'stop']) {
+for (const type of ['projectChoose', 'attachFiles', 'attachFolder', 'attachmentsClear', 'connectorFolder', 'connect', 'refresh', 'mcpAdd', 'mcpSite', 'notionConfigure', 'notionDisconnect', 'unityConfigure', 'unityEditorConfigure', 'copyMcpAuth', 'relayRepair', 'relayDiagnose', 'new', 'sessionNew', 'sessionRename', 'sessionExport', 'sessionImport', 'goalSet', 'goalClear', 'planSet', 'selection', 'relay', 'disconnectRelay', 'stop']) {
   $(type).addEventListener('click', () => vscode.postMessage({ type: type === 'new' ? 'sessionNew' : type }));
 }
 
@@ -164,7 +164,8 @@ function renderSessions(m) {
     remove.title = '대화 삭제';
     remove.disabled = !!m.busy || sessions.length < 2;
     remove.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'sessionDelete', id: s.id }); });
-    row.append(button, remove);
+    const duplicate = document.createElement('button'); duplicate.className = 'session-duplicate'; duplicate.textContent = '복제'; duplicate.title = '세션 복제'; duplicate.disabled = !!m.busy; duplicate.addEventListener('click', e => { e.stopPropagation(); vscode.postMessage({ type: 'sessionDuplicate', id: s.id }); });
+    row.append(button, duplicate, remove);
     list.append(row);
   }
 }
@@ -213,9 +214,35 @@ function renderGoal(goal, busyState = false) {
   $('goalSet').disabled = busyState;
 }
 
+function renderPlan(plan, busyState = false) {
+  const bar = $('planBar'), text = $('planText'), button = $('planSet');
+  if (!bar || !text) return;
+  const items = Array.isArray(plan) ? plan : [];
+  const done = items.filter(item => item.status === 'done').length;
+  bar.classList.toggle('completed', items.length > 0 && done === items.length);
+  text.textContent = items.length ? `${done}/${items.length} 완료 · ${items.find(item => item.status !== 'done')?.text || '모든 단계 완료'}` : '설정되지 않음';
+  text.title = items.map(item => `${item.status === 'done' ? '✓' : '○'} ${item.text}`).join('\n');
+  if (button) button.disabled = busyState;
+}
+
+function renderRuns(m) {
+  const list = $('runList'); if (!list) return;
+  list.replaceChildren();
+  for (const run of (m.runs || []).slice(0, 8)) {
+    const row = document.createElement('div'); row.className = `run-row ${run.status}`;
+    const label = document.createElement('span'); label.textContent = `${run.status === 'completed' ? '완료' : run.status === 'failed' ? '실패' : run.status === 'cancelled' ? '중단' : run.status === 'interrupted' ? '재시작됨' : '진행 중'} · ${run.statusText || ''}`;
+    row.append(label);
+    if (run.retryable) { const retry = document.createElement('button'); retry.textContent = '다시 실행'; retry.disabled = !!m.busy; retry.addEventListener('click', () => vscode.postMessage({ type: 'runRetry', id: run.id })); row.append(retry); }
+    list.append(row);
+  }
+  const tasks = $('taskList'); if (!tasks) return;
+  tasks.replaceChildren();
+  for (const task of (m.tasks || []).slice(0, 6)) { const row = document.createElement('div'); row.className = `task-row ${task.status}`; row.textContent = `백그라운드 작업 · ${task.status} · ${task.command}`; tasks.append(row); }
+}
+
 function send() {
   const message = $('prompt').value.trim(), value = $('model').value || $('agent').value;
-  const localCommand = /^\/goal(?:\s|$)/i.test(message);
+  const localCommand = /^\/(?:goal|plan)(?:\s|$)/i.test(message);
   const uploads = draftUploads.filter(item => item.status === 'ready' && item.file_id).map(item => ({ file_id: item.file_id, filename: item.filename, file_type: item.file_type, file_size: item.file_size || item.size }));
   if (draftUploads.some(item => item.status === 'uploading')) { localNotice('파일 업로드가 끝날 때까지 잠시 기다려 주세요.'); return; }
   if (draftUploads.some(item => item.status === 'failed')) { localNotice('업로드에 실패한 첨부 파일을 빼거나 다시 추가해 주세요.'); return; }
@@ -398,7 +425,7 @@ function render() {
 
 window.addEventListener('message', ({ data: m }) => {
   if (m.type === 'state') {
-    models = m.models || []; agents = m.agents || []; messages = m.state.messages || []; busy = m.busy; connection(m); renderSessions(m); renderMcp(m); renderGoal(m.state.goal, busy);
+    models = m.models || []; agents = m.agents || []; messages = m.state.messages || []; busy = m.busy; connection(m); renderSessions(m); renderMcp(m); renderGoal(m.state.goal, busy); renderPlan(m.state.plan, busy); renderRuns(m);
     $('model').replaceChildren(); $('agent').replaceChildren();
     const modelPlaceholder = document.createElement('option'); modelPlaceholder.value = ''; modelPlaceholder.textContent = '모델을 선택하세요'; $('model').append(modelPlaceholder);
     for (const x of models.filter(x => x.available !== false)) { const option = document.createElement('option'); option.value = x.id; option.textContent = x.display_name || x.name || x.id; $('model').append(option); }
@@ -412,6 +439,8 @@ window.addEventListener('message', ({ data: m }) => {
   if (m.type === 'stream') { const last = messages.at(-1); if (last?.role === 'assistant') { last.text = m.text; last.status = m.status; last.steps = m.steps || last.steps; render(); } }
   if (m.type === 'attachmentPreviews') { attachmentPreviews = new Map((m.previews || []).map(p => [p.file_id, p])); render(); }
   if (m.type === 'connection') connection(m);
+  if (m.type === 'run') { renderRuns({ runs: [m.run] }); }
+  if (m.type === 'task') { /* The next state snapshot contains the authoritative task list. */ }
   if (m.type === 'selection') { $('prompt').value += m.text; $('prompt').focus(); }
   if (m.type === 'accepted') { $('prompt').value = ''; for (const item of draftUploads) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); draftUploads = []; renderDraftUploads(); }
   if (m.type === 'uploadStarted') { const item = draftUploads.find(x => x.clientId === m.clientId); if (item) { item.status = 'uploading'; renderDraftUploads(); } }
@@ -419,6 +448,7 @@ window.addEventListener('message', ({ data: m }) => {
   if (m.type === 'uploadFailed') { const item = draftUploads.find(x => x.clientId === m.clientId); if (item) { item.status = 'failed'; item.error = m.error || '업로드 실패'; renderDraftUploads(); } }
   if (m.type === 'uploadRemoved') { const item = draftUploads.find(x => x.clientId === m.clientId); if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl); draftUploads = draftUploads.filter(x => x.clientId !== m.clientId); renderDraftUploads(); }
   if (m.type === 'notice') { $('notice').hidden = false; $('notice').textContent = m.text; }
+  if (m.type === 'approval') { $('notice').hidden = false; $('notice').textContent = '승인 대기 중 · VS Code 알림 창에서 승인 여부를 선택하세요.'; }
 });
 
 vscode.postMessage({ type: 'ready' });

@@ -4,6 +4,8 @@ function normalize(input,now=Date.now()){
   const value=input&&typeof input==='object'?input:{};
   const rawGoal=value.goal&&typeof value.goal==='object'?value.goal:null;
   const goal=rawGoal&&typeof rawGoal.text==='string'&&rawGoal.text.trim()?{text:rawGoal.text.trim().slice(0,1000),status:rawGoal.status==='completed'?'completed':'active',createdAt:Number.isFinite(rawGoal.createdAt)?rawGoal.createdAt:now,updatedAt:Number.isFinite(rawGoal.updatedAt)?rawGoal.updatedAt:now}:null;
+  const rawPlan=Array.isArray(value.plan)?value.plan:[];
+  const plan=rawPlan.slice(0,30).map((item,index)=>{const value=typeof item==='string'?{text:item}:item&&typeof item==='object'?item:{};return {id:typeof value.id==='string'&&value.id?value.id:`step-${index+1}`,text:typeof value.text==='string'?value.text.trim().slice(0,500):'',status:value.status==='done'?'done':'pending'};}).filter(item=>item.text);
   return {
     id:typeof value.id==='string'&&value.id?value.id:randomUUID(),
     title:typeof value.title==='string'&&value.title.trim()?value.title.trim().slice(0,80):'새 대화',
@@ -17,6 +19,7 @@ function normalize(input,now=Date.now()){
     compactionThreshold:Number.isFinite(value.compactionThreshold)?Math.min(90000,Math.max(16000,Math.trunc(value.compactionThreshold))):60000,
     contextSummary:typeof value.contextSummary==='string'?value.contextSummary.slice(0,18000):'',
     goal,
+    plan,
     createdAt:Number.isFinite(value.createdAt)?value.createdAt:now,
     updatedAt:Number.isFinite(value.updatedAt)?value.updatedAt:now,
   };
@@ -37,8 +40,13 @@ class SessionStore{
   create(title='새 대화'){const s=normalize({title});this.sessions.unshift(s);this.activeId=s.id;return s;}
   select(id){if(!this.sessions.some(s=>s.id===id))throw Error('대화를 찾을 수 없습니다.');this.activeId=id;return this.active;}
   rename(id,title){const s=this.sessions.find(x=>x.id===id);if(!s)throw Error('대화를 찾을 수 없습니다.');const clean=String(title||'').trim();if(!clean)throw Error('대화 이름을 입력하세요.');s.title=clean.slice(0,80);s.updatedAt=Date.now();return s;}
+  duplicate(id,title){const source=this.sessions.find(x=>x.id===String(id||''));if(!source)throw Error('대화를 찾을 수 없습니다.');const copy=normalize({...source,id:undefined,title:title||`${source.title} 복사`,conversationId:null,messages:source.messages.map(item=>({...item})),createdAt:Date.now(),updatedAt:Date.now()});this.sessions.unshift(copy);this.activeId=copy.id;return copy;}
+  setPlan(id,items){const s=this.sessions.find(x=>x.id===String(id||''));if(!s)throw Error('대화를 찾을 수 없습니다.');s.plan=normalize({plan:items}).plan;s.updatedAt=Date.now();return s;}
+  export(id=this.activeId){const session=this.sessions.find(x=>x.id===String(id||''));if(!session)throw Error('대화를 찾을 수 없습니다.');return normalize(session);}
+  import(value){const incoming=Array.isArray(value)?value:value&&Array.isArray(value.sessions)?value.sessions:[value];const added=[];for(const item of incoming.slice(0,20)){const session=normalize({...item,id:undefined,conversationId:null});this.sessions.unshift(session);added.push(session);}if(added[0])this.activeId=added[0].id;this.trim();return added;}
   remove(id){if(this.sessions.length<=1)throw Error('대화가 하나만 남아 있어 삭제할 수 없습니다.');const index=this.sessions.findIndex(s=>s.id===id);if(index<0)throw Error('대화를 찾을 수 없습니다.');this.sessions.splice(index,1);if(this.activeId===id)this.activeId=this.sessions[Math.max(0,index-1)].id;return this.active;}
-  summaries(){return this.sessions.map(s=>({id:s.id,title:s.title,updatedAt:s.updatedAt,messageCount:s.messages.length,active:s.id===this.activeId}));}
+  summaries(){return this.sessions.map(s=>({id:s.id,title:s.title,updatedAt:s.updatedAt,messageCount:s.messages.length,plan:s.plan,goal:s.goal,active:s.id===this.activeId}));}
+  trim(){this.sessions=this.sessions.slice(0,50);}
   async save(){await this.storage.update('schoolCode.sessions',this.sessions.map(s=>({...s,messages:s.messages.slice(-100)})));await this.storage.update('schoolCode.activeSession',this.activeId);}
 }
 module.exports={SessionStore,normalize};

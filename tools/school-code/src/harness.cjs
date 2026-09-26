@@ -78,19 +78,20 @@ async function runShell(root,{command,cwd='',timeout_ms=120000,env}={}){
 }
 
 class TaskManager{
-  constructor({maxTasks=8}={}){this.maxTasks=maxTasks;this.tasks=new Map();}
+  constructor({maxTasks=8,onChange}={}){this.maxTasks=maxTasks;this.onChange=onChange;this.tasks=new Map();}
   async start(root,{command,cwd='',max_runtime_ms=MAX_BACKGROUND_RUNTIME_MS,env}={}){
     validateCommand(command);if([...this.tasks.values()].filter(t=>t.status==='running').length>=this.maxTasks)throw Error('동시에 실행할 수 있는 백그라운드 작업 수를 초과했습니다.');
     const dir=await resolveCwd(root,cwd);const maxRuntime=boundedNumber(max_runtime_ms,MAX_BACKGROUND_RUNTIME_MS,1000,MAX_BACKGROUND_RUNTIME_MS);const id=randomUUID();
     const task={id,root,cwd:path.relative(root,dir).split(path.sep).join('/')||'.',command:command.trim(),status:'running',started_at:new Date().toISOString(),started_ms:Date.now(),stdout:'',stderr:'',exit_code:null,signal:null,timed_out:false};
-    const run=spawnShell(task.command,{cwd:dir,env:safeEnvironment(env),timeoutMs:maxRuntime,onOutput:({kind,text})=>{task[kind]=appendOutput(task[kind],text);}});task.process=run;this.tasks.set(id,task);
-    run.promise.then(result=>{Object.assign(task,result);task.status=task.cancel_requested?'cancelled':result.timed_out?'timeout':result.exit_code===0?'completed':'failed';task.finished_at=new Date().toISOString();delete task.process;this.trim();}).catch(error=>{task.status=task.cancel_requested?'cancelled':'failed';task.error=String(error.message||error).slice(0,300);task.finished_at=new Date().toISOString();delete task.process;this.trim();});
+    const run=spawnShell(task.command,{cwd:dir,env:safeEnvironment(env),timeoutMs:maxRuntime,onOutput:({kind,text})=>{task[kind]=appendOutput(task[kind],text);this.onChange?.(this.public(task),{type:'output',kind,text});}});task.process=run;this.tasks.set(id,task);this.onChange?.(this.public(task),{type:'started'});
+    run.promise.then(result=>{Object.assign(task,result);task.status=task.cancel_requested?'cancelled':result.timed_out?'timeout':result.exit_code===0?'completed':'failed';task.finished_at=new Date().toISOString();delete task.process;this.trim();this.onChange?.(this.public(task),{type:'finished'});}).catch(error=>{task.status=task.cancel_requested?'cancelled':'failed';task.error=String(error.message||error).slice(0,300);task.finished_at=new Date().toISOString();delete task.process;this.trim();this.onChange?.(this.public(task),{type:'finished',error:task.error});});
     return this.public(task);
   }
   get(id,root){const task=this.tasks.get(String(id||''));if(!task||task.root!==root)throw Error('작업을 찾을 수 없습니다.');return task;}
   public(task){const out={id:task.id,status:task.status,command:task.command,cwd:task.cwd,started_at:task.started_at,finished_at:task.finished_at,exit_code:task.exit_code,signal:task.signal,timed_out:task.timed_out};if(task.error)out.error=task.error;return out;}
   status(id,root){const task=this.get(id,root);return {...this.public(task),stdout_chars:task.stdout.length,stderr_chars:task.stderr.length};}
   output(id,root,max_chars=200000){const task=this.get(id,root);const max=boundedNumber(max_chars,200000,1,MAX_OUTPUT_CHARS);return {...this.public(task),stdout:task.stdout.slice(-max),stderr:task.stderr.slice(-max)};}
+  list(root){return [...this.tasks.values()].filter(task=>task.root===root).sort((a,b)=>(b.started_at||'').localeCompare(a.started_at||'')).slice(0,40).map(task=>this.public(task));}
   async cancel(id,root){const task=this.get(id,root);if(task.status!=='running')return this.public(task);task.cancel_requested=true;task.status='cancelling';task.process.terminate();await Promise.race([task.process.promise,new Promise(resolve=>setTimeout(resolve,10000))]);if(task.status==='cancelling'){task.status='cancelled';task.finished_at=new Date().toISOString();}return this.public(task);}
   async cancelRoot(root){const running=[...this.tasks.values()].filter(t=>t.root===root&&t.status==='running');for(const task of running){try{await this.cancel(task.id,root);}catch{}}}
   async dispose(){const running=[...this.tasks.values()].filter(t=>t.status==='running');for(const task of running){try{await this.cancel(task.id,task.root);}catch{}}this.tasks.clear();}

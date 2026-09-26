@@ -93,4 +93,52 @@ async function readInstructions(root){
 async function listFiles(root,input='',limit=200,{excludeDirectories=new Set()}={}){let start;try{start=await safePath(root,input,{directory:true});}catch(error){if(error.code==='PATH_NOT_FOUND')return {path:input.replace(/\\/g,'/'),exists:false,code:'PATH_NOT_FOUND',files:[],truncated:false};throw error;}const out=[];let visited=0;async function walk(dir){let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch(e){if(['EACCES','EPERM','ENOENT'].includes(e.code))return;throw e;}for(const e of entries){if(out.length>=limit||++visited>5000)return;if(DENIED.test(e.name)||e.isSymbolicLink()||e.isDirectory()&&excludeDirectories.has(e.name))continue;const p=path.join(dir,e.name),rel=path.relative(root,p).split(path.sep).join('/');if(e.isDirectory())await walk(p);else if(e.isFile())out.push(rel);}}await walk(start);return {path:input.replace(/\\/g,'/'),exists:true,files:out.sort(),truncated:out.length>=limit||visited>5000};}
 async function readLines(root,args){const r=await readText(root,args.path);const lines=r.text.split(/\r?\n/),start=args.start_line||1,end=args.end_line||300;if(end<start||end-start>1000)throw Error('한 번에 최대 1001줄을 읽을 수 있습니다.');return {path:args.path,sha256:r.hash,total_lines:lines.length,start_line:start,content:lines.slice(start-1,end).join('\n')};}
 async function search(root,args){if(typeof args.query!=='string'||!args.query||args.query.length>200)throw Error('검색어 오류');const listed=await listFiles(root,args.path||'',500);if(listed.exists===false)return {path:listed.path,exists:false,code:'PATH_NOT_FOUND',matches:[],truncated:false};const matches=[];for(const file of listed.files){let r;try{r=await readText(root,file);}catch{continue;}let n=0;for(const line of r.text.split(/\r?\n/)){n++;if(line.includes(args.query)){matches.push({path:file,line:n,text:line.slice(0,500)});if(matches.length>=(args.limit||50))return {path:listed.path,exists:true,matches,truncated:true};}}}return {path:listed.path,exists:true,matches,truncated:listed.truncated};}
-module.exports={safePath,createDirectory,pathInfo,readText,readLines,listFiles,search,readAssetMetadata,readInstructions,readImage,listVisualAssets,readModelMetadata,listModelAssets,parseImageHeader,parseUnityTextureMeta,MAX_IMAGE_BYTES,MAX_MODEL_METADATA_BYTES,sha};
+async function projectTree(root, input = '', { depth = 3, limit = 500 } = {}) {
+  const maxDepth = Math.min(8, Math.max(0, Number.isFinite(Number(depth)) ? Math.trunc(Number(depth)) : 3));
+  const max = Math.min(1000, Math.max(1, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 500));
+  const start = await safePath(root, input, { directory: true });
+  const nodes = [];
+  let visited = 0;
+  async function walk(dir, level) {
+    if (level > maxDepth || nodes.length >= max) return;
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch (error) {
+      if (['EACCES', 'EPERM', 'ENOENT'].includes(error.code)) return;
+      throw error;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (++visited > 10000 || nodes.length >= max || DENIED.test(entry.name) || entry.isSymbolicLink()) continue;
+      const full = path.join(dir, entry.name), relative = path.relative(root, full).split(path.sep).join('/');
+      const directory = entry.isDirectory();
+      nodes.push({ path: relative, name: entry.name, type: directory ? 'directory' : 'file', depth: level });
+      if (directory) await walk(full, level + 1);
+    }
+  }
+  await walk(start, 0);
+  return { path: input.replace(/\\/g, '/'), nodes, truncated: nodes.length >= max || visited > 10000 };
+}
+
+async function findSymbols(root, { query = '', path: input = '', limit = 100 } = {}) {
+  const needle = String(query || '').trim();
+  if (!needle || needle.length > 200) throw Error('심볼 검색어는 1~200자여야 합니다.');
+  const listed = await listFiles(root, input, 1000);
+  if (listed.exists === false) return { path: listed.path, exists: false, code: 'PATH_NOT_FOUND', symbols: [], truncated: false };
+  const symbols = [];
+  const declaration = /\b(?:public|private|protected|internal|static|async|export|const|let|var|virtual|override|final)\s+\b(class|interface|struct|enum|function|func|def|method|void)\s+([A-Za-z_$][\w$]*)|\b(class|interface|struct|enum|function|func|def|method|void)\s+([A-Za-z_$][\w$]*)/;
+  for (const file of listed.files) {
+    let content;
+    try { content = (await readText(root, file)).text; } catch { continue; }
+    const lines = content.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index++) {
+      const line = lines[index];
+      const match = line.match(declaration);
+      const kind = match?.[1] || match?.[3], name = match?.[2] || match?.[4];
+      if (!name || !name.toLowerCase().includes(needle.toLowerCase())) continue;
+      symbols.push({ name, kind, path: file, line: index + 1, text: line.trim().slice(0, 500) });
+      if (symbols.length >= Math.min(200, Math.max(1, Number(limit) || 100))) return { path: listed.path, exists: true, symbols, truncated: true };
+    }
+  }
+  return { path: listed.path, exists: true, symbols, truncated: listed.truncated };
+}
+
+module.exports={safePath,createDirectory,pathInfo,readText,readLines,listFiles,search,projectTree,findSymbols,readAssetMetadata,readInstructions,readImage,listVisualAssets,readModelMetadata,listModelAssets,parseImageHeader,parseUnityTextureMeta,MAX_IMAGE_BYTES,MAX_MODEL_METADATA_BYTES,sha};

@@ -2,7 +2,7 @@
   "name": "koreatech-school-code",
   "displayName": "KOREATECH School Code",
   "description": "학교 AI 채팅과 승인 기반 개발 도구를 VS Code에서 사용합니다.",
-  "version": "0.19.7",
+  "version": "0.20.0",
   "publisher": "skylight-local",
   "license": "UNLICENSED",
   "repository": {
@@ -83,6 +83,26 @@
       {
         "command": "schoolCode.gitConfigure",
         "title": "School Code: Git CLI 경로 설정"
+      },
+      {
+        "command": "schoolCode.relayDiagnose",
+        "title": "School Code: Workspace 연결 진단"
+      },
+      {
+        "command": "schoolCode.sessionRename",
+        "title": "School Code: 현재 세션 이름 변경"
+      },
+      {
+        "command": "schoolCode.sessionDuplicate",
+        "title": "School Code: 현재 세션 복제"
+      },
+      {
+        "command": "schoolCode.sessionExport",
+        "title": "School Code: 현재 세션 내보내기"
+      },
+      {
+        "command": "schoolCode.sessionImport",
+        "title": "School Code: 세션 가져오기"
       }
     ],
     "viewsContainers": {
