@@ -11,11 +11,11 @@ const {z}=require('zod');
 const {authorized,json,readJson}=require('./bridge.cjs');
 
 const {RelayAuthStore,encodeCookie,pairingPage}=require('./auth.cjs');
-const RELAY_VERSION='0.19.0';
+const RELAY_VERSION='0.19.3';
 
 
 
-const MUTATING_TOOLS=new Set(['create_directory','save_image_asset','propose_edit','run_shell','start_background_task','task_cancel','git_create_branch','git_stage','git_commit','git_pull','git_push','git_fetch','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene','unity_play','unity_pause','unity_stop','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_set_animator_parameter']);
+const MUTATING_TOOLS=new Set(['create_directory','generate_image_asset','save_image_asset','propose_edit','run_shell','start_background_task','task_cancel','git_create_branch','git_stage','git_commit','git_pull','git_push','git_fetch','unity_build','unity_refresh_assets','unity_set_component','unity_create_gameobject','unity_save_scene','unity_play','unity_pause','unity_stop','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_set_animator_parameter']);
 const vector3=z.object({x:z.number(),y:z.number(),z:z.number()});
 
 
@@ -27,6 +27,8 @@ const toolDefinitions={
   path_info:{description:'Check whether a relative file or folder exists in the connected project. A missing path is a normal result, not a request to create it.',schema:{path:z.string().max(1024).default('')}},
 
   create_directory:{description:'Create a relative folder inside the connected VS Code project after explicit approval. Existing folders are left unchanged; paths outside the project, hidden/secrets directories, links and dot-paths are rejected.',schema:{path:z.string().min(1).max(1024)}},
+
+  generate_image_asset:{description:'Generate an image through the school AI image model using the logged-in Chrome session and return its attachment file_id. Use this when native workflow image tools are unavailable; pass the returned file_id to save_image_asset to keep the PNG/WebP in the connected project. Image generation consumes the school account quota and requires explicit approval.',schema:{prompt:z.string().min(1).max(20000),reference_file_ids:z.array(z.string().regex(/^[a-zA-Z0-9-]{1,200}$/)).max(5).default([])}},
 
   save_image_asset:{description:'Save an image attachment returned by the school AI into a relative image path inside the connected VS Code project after explicit approval. Use create_directory first when the parent folder does not exist. Supported formats are PNG, JPEG, WebP, GIF, SVG and ICO; the image is validated before it is kept and existing files are not overwritten unless overwrite is true.',schema:{file_id:z.string().regex(/^[a-zA-Z0-9-]{1,200}$/),path:z.string().min(1).max(1024),overwrite:z.boolean().default(false)}},
 

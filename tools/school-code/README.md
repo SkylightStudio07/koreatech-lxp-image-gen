@@ -1,8 +1,8 @@
-# KOREATECH School Code — 0.19.0
+# KOREATECH School Code — 0.19.3
 
 VS Code에서 학교 Astra/Fable 모델과 대화하고, 코덱스식 프로젝트 도구로 현재 프로젝트를 검색·읽거나 수정안을 승인하는 확장입니다. OpenAI API 키 없이 학교 로그인 세션을 사용합니다. 학교·Microsoft가 제공하는 공식 확장은 아닙니다.
 
-일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.19.0.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
+일반 사용자는 저장소를 내려받아 빌드하지 말고 GitHub Release에서 `school-code-0.19.3.vsix`와 `school-code-connector-0.3.0.zip`을 설치하세요. 이 문서는 기능·운영·개발 세부사항을 위한 문서이며, 구성원용 순서도는 저장소 루트의 [forBCSD.md](https://github.com/SkylightStudio07/koreatech-lxp-image-gen/blob/master/forBCSD.md)를 따릅니다.
 
 > **공유 전 확인:** 기존에 동아리에서 사용하던 학교 AI MCP 서버는 권한이 있는 구성원에게 URL과 등록 정보를 공유해도 됩니다. School Code Workspace 릴레이는 이제 BCSD 계정 페어링을 통해 사용자·워크스페이스별 토큰과 워커 연결을 분리합니다. 기존 정적 `MCP_TOKEN`, `WORKER_TOKEN`도 호환되지만 새 설치에서는 브라우저 승인 방식을 권장합니다. 토큰, Notion 토큰, Unity Editor 토큰은 공개 저장소나 단체 채팅에 올리지 마세요.
 
@@ -14,7 +14,7 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 
 ## 설치와 채팅
 
-1. VS Code에 `school-code-0.19.0.vsix`를 설치합니다.
+1. VS Code에 `school-code-0.19.3.vsix`를 설치합니다.
 2. School Code 채팅 패널의 **연결 및 외부 MCP → Chrome 확장 폴더 열기**를 누릅니다.
 3. Chrome chrome://extensions에서 개발자 모드를 켜고 **압축해제된 확장 프로그램 로드**로 열린 chrome-extension 폴더를 선택합니다.
 4. VS Code의 **브라우저 연결**을 눌러 로그인된 학교 탭을 엽니다. Chrome 확장이 자동 연결합니다.
@@ -39,6 +39,18 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 - 학교 Workspace 도구에는 `path_info`와 `create_directory`가 포함됩니다. 없는 경로를 확인하는 것은 정상적인 읽기 결과이며, 경로가 없다고 폴더를 자동 생성하지 않습니다. 상대 경로의 새 폴더와 중첩 폴더만 만들 수 있고, 프로젝트 밖 경로·숨김/비밀 경로·심볼릭 링크·기존 파일은 거부합니다. 폴더 생성은 파일 수정과 같은 쓰기 승인으로 처리됩니다.
 - Git CLI 도구는 연결된 PC의 Git을 사용해 상태·diff·로그·브랜치를 읽고, 승인 후 선택 파일 stage·commit·fast-forward pull·push를 실행합니다. Git 인증 정보와 SSH 키는 NAS로 전송하지 않습니다.
 - `save_image_asset`은 학교 AI가 생성했거나 대화에 첨부한 이미지의 `file_id`를 연결된 프로젝트 안의 PNG/JPEG/WebP/GIF/SVG/ICO 파일로 저장합니다. 부모 폴더는 먼저 `create_directory`로 만들고, 저장·덮어쓰기 모두 승인 대상입니다. 이미지는 16 MiB 이하이며 SVG 안전성도 확인합니다.
+- `generate_image_asset`은 워크플로의 네이티브 이미지 도구가 노출되지 않을 때 로그인된 Chrome 세션의 학교 이미지 모델을 직접 호출해 `file_id`를 반환합니다. 반환된 ID를 `save_image_asset`에 넘기면 프로젝트에 저장됩니다. 생성은 학교 계정 할당량을 사용하며 별도 승인이 필요합니다.
+
+이미지 작업은 별도의 특수 문법을 입력하지 않습니다. Workspace MCP가 연결된 `School Image Producer` 에이전트를 선택하고 다음처럼 요청하면 됩니다.
+
+```text
+기획서와 아트 디렉션을 먼저 읽고 필요한 버튼 시안을 만들어줘.
+네이티브 이미지 도구가 보이지 않으면 generate_image_asset을 호출하고,
+반환된 file_id를 save_image_asset으로 Assets/Art/Shop/VertexButtons.png에 저장해줘.
+생성·저장 전에 각 승인 단계를 기다리고, 완료 후 실제 저장 경로와 이미지 크기를 보고해줘.
+```
+
+`generate_image_asset`이 에이전트 도구 목록에 없으면 NAS 릴레이를 0.19.3으로 재빌드한 뒤 학교 리소스에서 MCP를 해제·재등록하고, 워크플로의 MCP 노드에서 `School Code Workspace`를 다시 선택해야 합니다.
 - 중단 시 브라우저가 진행 중인 요청을 취소합니다. 이미 학교 서버에서 처리된 이용량까지 취소되는 것은 아닙니다. 자동 재전송하지 않습니다.
 - 대화는 VS Code의 해당 작업 영역 로컬 상태에 최근 100개 메시지까지 저장됩니다.
 - 학교 AI가 이미지 생성 결과를 첨부하면 Chrome의 로그인 탭에서 `/chat/uploads/{file_id}`를 받아 대화 안에 PNG/JPEG/WebP/GIF/SVG 미리보기로 표시합니다. 이미지 본문은 세션 저장소에 저장하지 않고 현재 확장 실행 중인 메모리에만 보관합니다.
@@ -121,7 +133,7 @@ Blender·Unreal·Figma MCP는 서버마다 인증·전송 방식이 다릅니다
 
 #### Unity CLI 경로 오류
 
-`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.19.0.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
+`Unable to write to User Settings because schoolCode.unityExecutable is not a registered configuration` 오류가 나오면 이전 VSIX가 설치된 상태입니다. `school-code-0.19.3.vsix`로 업데이트하고 **Developer: Reload Window**를 실행하세요. 0.8.1부터 Unity 경로는 VS Code User Settings를 갱신하지 않고 확장 전용 상태에 저장하므로 해당 설정 오류가 발생하지 않습니다. `Unity.exe`가 PATH에 있으면 그대로 입력하고, 아니면 `C:\Program Files\Unity\Hub\Editor\버전\Editor\Unity.exe`처럼 전체 경로를 입력합니다.
 
 Unity CLI는 **학교 Workspace 연결 → Unity CLI 경로 설정 → Unity 에이전트 선택** 순서로 사용합니다. 카탈로그의 버튼 이름도 `경로 설정`으로 표시됩니다. 이 단계는 `Unity.exe` 위치를 저장하는 것이며, 계속 실행 중인 MCP 서버를 만드는 과정이 아닙니다. 경로를 저장했다고 해서 학교 에이전트가 자동으로 선택되는 것도 아닙니다. 프로젝트 안에서만 테스트·빌드가 실행되며, 빌드와 에셋 새로 고침은 승인 창이 뜹니다.
 
@@ -362,5 +374,4 @@ npm run package:release
 code --extensionDevelopmentPath="현재 school-code 폴더의 절대 경로"
 ```
 
-출력 패널 **School Code**에서 중계 연결 오류를 확인할 수 있습니다. 토큰/학교 쿠키/대화 내용을 로그에 출력하지 않습니다.
-
+출력 패널 **School Code**에서 중계 연결 오류를 확인할 수 있습니다. 토큰/학교 쿠키/대화 내용을 로그에 출력하지 않습니다.\n

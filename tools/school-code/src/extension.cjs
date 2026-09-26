@@ -663,6 +663,19 @@ function activate(context){
       return {attempted:true,created:false,automatic:true,error:String(e.message||e).slice(0,240)};
     }
   }
+  async function generateImageAsset(args,ensureActive){
+    const prompt=String(args.prompt||'').trim();if(!prompt)throw Error('이미지 생성 프롬프트가 비어 있습니다.');
+    const references=Array.isArray(args.reference_file_ids)?args.reference_file_ids.map(String).slice(0,5):[];
+    if(!await approval(`학교 AI 이미지 모델로 이미지를 생성하려 합니다. 학교 계정 할당량을 사용합니다.\n프롬프트: ${prompt.slice(0,700)}`,{write:true}))throw Error('사용자가 이미지 생성을 거절했습니다.');
+    await ensureActive();
+    const body={message:prompt,model_id:'gpt-image-2',locale:'ko'};
+    if(references.length){body.file_ids=references;body.file_attachments=references.map(file_id=>({file_id,file_type:'image'}));}
+    let raw='';
+    await bridge.request('/chat/completions',{method:'POST',body,stream:true,onChunk:chunk=>{if(raw.length+chunk.length>12*1024*1024)throw Error('이미지 생성 응답이 너무 큽니다.');raw+=chunk;},signal:controller?.signal});
+    const attachments=[];const seen=new Set();const parse=(value)=>{if(value===null||value===undefined)return;if(typeof value==='string'){const text=value.trim();if((text.startsWith('{')||text.startsWith('['))&&text.length<4*1024*1024){try{parse(JSON.parse(text));}catch{/* Ordinary SSE text. */}}return;}if(typeof value!=='object')return;if(Array.isArray(value)){for(const item of value)parse(item);return;}const id=value.file_id??value.fileId??value.attachment_id??value.attachmentId;if(/^[a-zA-Z0-9-]{1,200}$/.test(String(id||''))&&!seen.has(String(id))){seen.add(String(id));attachments.push({file_id:String(id),filename:typeof value.filename==='string'?value.filename:undefined,file_type:typeof value.file_type==='string'?value.file_type:'image',file_size:Number.isFinite(value.file_size)?value.file_size:undefined});}for(const [key,child] of Object.entries(value)){if(['file_id','fileId','attachment_id','attachmentId','filename','file_type','file_size'].includes(key))continue;parse(child);}};
+    const sse=new SSEParser(event=>parse(event));sse.push(raw);sse.end();if(!attachments.length)throw Error('학교 이미지 모델이 첨부 file_id를 반환하지 않았습니다. 모델 ID가 활성화되어 있는지 확인하세요.');
+    const attachment=attachments[0];return {generated:true,model_id:'gpt-image-2',attachment,file_id:attachment.file_id,filename:attachment.filename||`school-image-${attachment.file_id}.png`,file_type:'image'};
+  }
   async function executeTool(job,isActive,ensureActive){
     if(!vscode.workspace.isTrusted||!relayRoot||!isActive())throw Error('작업 영역 연결이 종료되었습니다.');
     const workspaceConnection=mcpRegistry.get('school-workspace');if(workspaceConnection?.enabled===false)throw Error('학교 Workspace MCP가 꺼져 있습니다. 패널에서 다시 켜세요.');
@@ -671,7 +684,7 @@ function activate(context){
     if(job.name==='workspace_info'){
       const setup=await ensureStarterInstructions(root,ensureActive);const instructions=await workspace.readInstructions(root);const projectSkills=await skills.listSkills(root);
       const notionLinks=context.globalState?.get?.('schoolCode.notion.publicLinks',[])||[];
-      const tools=['path_info','create_directory','save_image_asset','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','read_skill','git_info','git_status','git_diff','git_log','git_branches','git_create_branch','git_stage','git_commit','git_fetch','git_pull','git_push','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter','propose_edit'];
+      const tools=['path_info','create_directory','generate_image_asset','save_image_asset','list_files','read_file','search_text','read_asset_metadata','list_visual_assets','read_image','list_model_assets','read_model_metadata','read_instructions','read_skill','git_info','git_status','git_diff','git_log','git_branches','git_create_branch','git_stage','git_commit','git_fetch','git_pull','git_push','run_shell','start_background_task','task_status','task_output','task_cancel','notion_search','notion_fetch_page','notion_list_children','unity_project_info','unity_run_tests','unity_build','unity_refresh_assets','unity_open_scene','unity_find_gameobjects','unity_get_component','unity_set_component','unity_create_gameobject','unity_save_scene','unity_capture_scene','unity_capture_game','unity_model_preview','unity_play','unity_pause','unity_stop','unity_get_console_logs','unity_project_status','unity_add_component','unity_remove_component','unity_duplicate_gameobject','unity_delete_gameobject','unity_move_gameobject','unity_instantiate_prefab','unity_assign_material','unity_get_animator_info','unity_set_animator_parameter','propose_edit'];
       let gitState;try{gitState=await git.repositoryInfo(root,{executable:gitExecutable()});}catch(error){gitState={repository:false,code:error.code||'GIT_ERROR',message:error.message};}
       return {name:path.basename(root),tools,write_requires_approval:true,root_isolation:true,instruction_files:instructions.files.map(f=>f.path),instructions_missing:instructions.files.length===0,recommended_instruction_file:instructions.files.length===0?'AGENTS.md':undefined,instructions_setup:setup,skills:projectSkills,git:gitState,mcp_connections:mcpSnapshot(),notion_configured:!!(await context.secrets.get('schoolCode.notion.integrationToken'))||notionLinks.length>0,notion_public_links:notionLinks,unity_executable_configured:unityPathConfigured(),unity_editor_configured:!!(await context.secrets.get('schoolCode.unity.editorToken')),limits:{read_file_max_lines:1001,read_file_max_bytes:16777216,asset_hash_max_bytes:268435456,image_max_bytes:workspace.MAX_IMAGE_BYTES,image_max_count_per_request:1,image_cache_entries:8,model_metadata_max_bytes:workspace.MAX_MODEL_METADATA_BYTES,edit_max_chars:200000,shell_command_max_chars:20000,background_task_max_runtime_ms:1800000}};
     }
@@ -729,6 +742,7 @@ function activate(context){
       if(!await approval(`학교 AI가 ${path.basename(root)} 프로젝트 안에 폴더를 생성하려 합니다.\n경로: ${relative}\n프로젝트 밖의 경로와 숨김·비밀 폴더는 허용되지 않습니다.`,{write:true}))throw Error('사용자가 거절했습니다.');
       await ensureActive();return workspace.createDirectory(root,relative);
     }
+    if(job.name==='generate_image_asset')return generateImageAsset(args,ensureActive);
     if(job.name==='save_image_asset')return saveImageAsset(root,args,ensureActive);
     const unityTool=['unity_project_info','unity_run_tests','unity_build','unity_refresh_assets'].includes(job.name);
     if(unityTool){
