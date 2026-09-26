@@ -423,6 +423,10 @@ function activate(context){
     return {id,name:String(agent.name||agent.display_name||id).slice(0,200),description:typeof agent.description==='string'?agent.description.slice(0,500):'',has_workflow:workflow||agent.has_workflow===false};
   }
   function agentUsesWorkflow(agent){return agent?.has_workflow===true||agent?.is_workflow===true||agent?.type==='workflow'||agent?.kind==='workflow'||typeof agent.workflow_id==='string'||(agent.workflow&&typeof agent.workflow==='object');}
+  function isImageProducerAgent(agent){
+    const text=`${agent?.name||''} ${agent?.description||''}`.toLowerCase();
+    return /school\s*image\s*producer|image\s*producer|이미지\s*(제작|생성|프로듀서)/i.test(text);
+  }
   async function resolveAgent(id){
     const current=agents.find(item=>item.id===id);if(!current)return null;
     if(current.has_workflow!==undefined)return current;
@@ -519,7 +523,7 @@ function activate(context){
     const inputText=history?`[이전 대화]\n${history}\n\n[현재 프로젝트와 요청]\n${composed}`:composed;
     const body={input_text:inputText,stream:true};
     if(attachments.length){body.file_ids=attachments.map(item=>item.file_id);body.file_attachments=attachments;}
-    const steps=[];let done=false,lastNodeText='',workflowAttachments=[];
+    const steps=[];let done=false,lastNodeText='',lastSubstantiveNodeText='',workflowAttachments=[];
     const parser=new SSEParser(event=>{
       const type=String(event.type||'').toLowerCase();
       const eventKeys=Object.keys(event||{}).filter(key=>key!=='data').sort().join(',');
@@ -531,18 +535,36 @@ function activate(context){
       if(type==='token'){const text=workflowEventText(event);if(text)answer.text+=text;answer.status='LLM 실행 중';post({type:'stream',text:answer.text,status:answer.status,steps});return;}
       if(type==='node_output'){
         const text=workflowEventText(event);if(text)lastNodeText=text;
-        const label=workflowNodeLabel(event);steps.push({type:'node_output',label,status:'단계 완료'});answer.status=/(mcp|tool)/i.test(label)?'MCP 도구 실행 중':'단계 완료';post({type:'stream',text:answer.text,status:answer.status,steps});return;
+        const label=workflowNodeLabel(event);if(text&&!/(^|\b)(output|출력)(\b|$)/i.test(label)&&!/(^|\b)(input|입력)(\b|$)/i.test(label))lastSubstantiveNodeText=text;steps.push({type:'node_output',label,status:'단계 완료'});answer.status=/(mcp|tool)/i.test(label)?'MCP 도구 실행 중':'단계 완료';post({type:'stream',text:answer.text,status:answer.status,steps});return;
       }
       if(type==='node_error'){const detail=workflowEventText(event)||'워크플로우 단계에서 오류가 발생했습니다.';const code=String(event.code||event.error_code||'');const expected=/PATH_NOT_FOUND|NOT_A_REPOSITORY|경로를 찾을 수 없습니다|Git 저장소가 아닙니다/i.test(`${code} ${detail}`);steps.push({type:'node_error',label:workflowNodeLabel(event),status:expected?'확인 필요':'오류',detail});if(expected){answer.status='경로 또는 저장소를 확인하는 중';post({type:'stream',text:answer.text,status:answer.status,steps});return;}throw Error(detail.slice(0,300));}
       if(type==='run_error'){throw Error((workflowEventText(event)||'워크플로우 실행에 실패했습니다.').slice(0,300));}
       if(type==='run_end'){
         const text=workflowEventText(event);const finalAttachments=collectWorkflowAttachments(event,{imageHint:true});workflowAttachments=mergeAttachments(workflowAttachments,finalAttachments);answer.attachments=workflowAttachments;
-        output.appendLine(`[workflow] run_end text_length=${text.length} accumulated_length=${answer.text.length} node_output_length=${lastNodeText.length} output_shape=${workflowValueShape(event.output)} image_tools_shape=${workflowValueShape(event.image_tools_attached)} attachment_count=${workflowAttachments.length}`);if(!answer.text)answer.text=text||lastNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
+        output.appendLine(`[workflow] run_end text_length=${text.length} accumulated_length=${answer.text.length} node_output_length=${lastNodeText.length} substantive_node_output_length=${lastSubstantiveNodeText.length} output_shape=${workflowValueShape(event.output)} image_tools_shape=${workflowValueShape(event.image_tools_attached)} attachment_count=${workflowAttachments.length}`);if(!answer.text)answer.text=text||lastSubstantiveNodeText||'워크플로우는 완료됐지만 최종 답변 텍스트를 받지 못했습니다. 단계 결과를 확인하거나 같은 요청을 다시 실행해 주세요.';
         answer.status='완료';answer.model=event.model_id||event.model;answer.finish_reason=event.finish_reason;answer.runId=event.run_id||event.runId;done=true;steps.push({type:'run_end',status:'완료'});post({type:'stream',text:answer.text,status:answer.status,steps});
       }
     });
     try{await requestSchool(`/agents/${encodeURIComponent(agent.id)}/workflow/run`,{method:'POST',body,onChunk:t=>parser.push(t),stream:true,signal:controller.signal},(attempt,total)=>{answer.status=`학교 요청 재시도 중… (${attempt}/${total})`;post({type:'stream',text:answer.text,status:answer.status,steps});});parser.end();if(!done)throw Error('워크플로우 응답이 중간에 종료되었습니다. 자동 재시도 횟수를 초과했습니다.');answer.steps=steps;if(compacted||summaryPrefix)state.contextSummary='';await preloadAttachments(answer.attachments);}
     catch(e){answer.status=e.message;answer.steps=steps;throw e;}
+  }
+  async function sendDirectImage(message,agent,answer,uploads=[]){
+    answer.status='이미지 생성 중';
+    post({type:'stream',text:answer.text,status:answer.status,steps:[]});
+    const description=String(agent?.description||'').trim();
+    const prompt=[message.trim(),description?`[이미지 에이전트 지침]\n${description}`:'',["[출력 지침]","이미지 한 장만 생성하고, 설명 텍스트 대신 생성된 첨부 파일을 반환하세요.","투명 배경·파일 형식·크기 같은 사용자의 요구를 그대로 지키세요."].join('\n')].filter(Boolean).join('\n\n');
+    const ensureBrowserActive=async()=>{
+      if(controller?.signal.aborted)throw Error('중단됨');
+      if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
+    };
+    const generated=await generateImageAsset({prompt,reference_file_ids:uploads.map(item=>item.file_id).slice(0,5),skipApproval:true},ensureBrowserActive);
+    answer.text=`이미지를 생성했습니다.\n\nfile_id: ${generated.file_id}\nfilename: ${generated.filename}`;
+    answer.attachments=cleanAttachments([generated.attachment]);
+    answer.model=generated.model_id;
+    answer.status='완료';
+    answer.steps=[{type:'image_generation',label:'학교 이미지 모델',status:'완료'}];
+    post({type:'stream',text:answer.text,status:answer.status,steps:answer.steps});
+    await preloadAttachments(answer.attachments);
   }
   async function send(data){const rawMessage=String(data.message||'').trim();if(/^\/goal(?:\s|$)/i.test(rawMessage))return goalCommand(rawMessage);if(controller)return;if(projectBusy)throw Error('파일 선택을 마친 뒤 전송하세요.');if(!vscode.workspace.isTrusted)throw Error('신뢰된 작업 영역에서 사용하세요.');if(!bridge.connected)throw Error('학교 브라우저 연결을 먼저 확인하세요.');
     const requested=cleanAttachments(data.uploads).slice(0,MAX_UPLOADS),uploaded=[];const seen=new Set();
@@ -550,7 +572,7 @@ function activate(context){
     let message=String(data.message||'');if(!message.trim()&&uploaded.length)message='첨부한 파일을 확인하고 필요한 내용을 설명해 주세요.';if(!message.trim())throw Error('질문을 입력하거나 파일을 첨부하세요.');
     let compacted=null;
     if(state.contextCompaction&&!state.contextSummary){const limit=compactThreshold(state.compactionThreshold);if(estimateMessages([...state.messages,{role:'user',text:message}])>limit)compacted=compactMessages(state.messages,Math.max(16000,limit-message.length));if(compacted){state.messages=compacted.messages;state.contextSummary=compacted.summary;state.conversationId=null;post({type:'notice',text:`컨텍스트를 압축했습니다. 이전 메시지 ${compacted.removed}개를 요약하고 새 대화 맥락으로 이어갑니다.`});await save();snapshot();}}
-    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+goalPrompt()+harnessPrompt()+`\n\n[사용자 요청]\n${message}`);const selectedAgent=data.agent?await resolveAgent(String(data.agent)):null;const workflow=Boolean(selectedAgent&&agentUsesWorkflow(selectedAgent));const body=workflow?null:chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId,fileIds:uploaded.map(a=>a.file_id),fileAttachments:uploaded},models);
+    const summaryPrefix=state.contextSummary?`${state.contextSummary}\n\n[현재 요청]\n`:'';const composed=projectContext.compose(summaryPrefix+goalPrompt()+harnessPrompt()+`\n\n[사용자 요청]\n${message}`);const selectedAgent=data.agent?await resolveAgent(String(data.agent)):null;const directImage=Boolean(selectedAgent&&isImageProducerAgent(selectedAgent));const workflow=Boolean(selectedAgent&&agentUsesWorkflow(selectedAgent)&&!directImage);const body=workflow||directImage?null:chatBody({message:composed,model:data.model,agent:data.agent,mode:data.mode,conversationId:state.conversationId,fileIds:uploaded.map(a=>a.file_id),fileAttachments:uploaded},models);
     const info=projectContext.info();
     state.model=data.model;state.agent=data.agent||'';state.mode=data.mode;if(state.title==='새 대화')state.title=message.replace(/\s+/g,' ').trim().slice(0,48)||'새 대화';state.messages.push({role:'user',text:message,attachments:uploaded,project:info.files.length?info.project?.name:undefined,contextFiles:info.files});projectContext.clear();const answer={role:'assistant',text:'',status:'응답 중'};state.messages.push(answer);
     controller=new AbortController();post({type:'accepted'});snapshot();void preloadAttachments(uploaded);let done=false;
@@ -561,8 +583,8 @@ function activate(context){
       if(event.type==='error')throw Error(String(event.content||event.error||'학교 응답 오류').slice(0,300));
       if(event.type==='done'){done=true;answer.status='완료';answer.model=event.model_id;answer.attachments=cleanAttachments(event.attachments);answer.finish_reason=event.finish_reason;if(!answer.text&&event.content)answer.text=event.content;if(compacted||summaryPrefix)state.contextSummary='';}
     });
-    try{if(workflow){await sendWorkflow(selectedAgent,composed,answer,compacted,summaryPrefix,uploaded);}else{await requestSchool('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal},(attempt,total)=>{answer.status=`학교 요청 재시도 중… (${attempt}/${total})`;post({type:'stream',text:answer.text,status:answer.status});});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 자동 재시도 횟수를 초과했습니다.');await preloadAttachments(answer.attachments);}}
-    catch(e){answer.status=e.message;}
+    try{if(directImage){await sendDirectImage(message,selectedAgent,answer,uploaded);}else if(workflow){await sendWorkflow(selectedAgent,composed,answer,compacted,summaryPrefix,uploaded);}else{await requestSchool('/chat/completions',{method:'POST',body,stream:true,onChunk:t=>parser.push(t),signal:controller.signal},(attempt,total)=>{answer.status=`학교 요청 재시도 중… (${attempt}/${total})`;post({type:'stream',text:answer.text,status:answer.status});});parser.end();if(!done)throw Error('응답이 중간에 종료되었습니다. 자동 재시도 횟수를 초과했습니다.');await preloadAttachments(answer.attachments);}}
+    catch(e){answer.status=String(e?.message||e||'학교 요청에 실패했습니다.').slice(0,500);if(!answer.text)answer.text=`요청을 완료하지 못했습니다.\n\n${answer.status}`;}
     finally{controller=null;await save();snapshot();}
   }
   const previews=new Map();context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('school-code-preview',{provideTextDocumentContent:u=>previews.get(u.toString())||''}));
@@ -666,14 +688,35 @@ function activate(context){
   async function generateImageAsset(args,ensureActive){
     const prompt=String(args.prompt||'').trim();if(!prompt)throw Error('이미지 생성 프롬프트가 비어 있습니다.');
     const references=Array.isArray(args.reference_file_ids)?args.reference_file_ids.map(String).slice(0,5):[];
-    if(!await approval(`학교 AI 이미지 모델로 이미지를 생성하려 합니다. 학교 계정 할당량을 사용합니다.\n프롬프트: ${prompt.slice(0,700)}`,{write:true}))throw Error('사용자가 이미지 생성을 거절했습니다.');
+    if(args.skipApproval!==true&&!await approval(`학교 AI 이미지 모델로 이미지를 생성하려 합니다. 학교 계정 할당량을 사용합니다.\n프롬프트: ${prompt.slice(0,700)}`,{write:true}))throw Error('사용자가 이미지 생성을 거절했습니다.');
     await ensureActive();
-    const body={message:prompt,model_id:'gpt-image-2',locale:'ko'};
+    // The school API accepts gpt-5.6-sol for image requests and routes the
+    // request internally to its image backend. Sending gpt-image-2 directly
+    // can return a completed stream without an attachment for this account.
+    const body={message:prompt,model_id:'gpt-5.6-sol',locale:'ko'};
     if(references.length){body.file_ids=references;body.file_attachments=references.map(file_id=>({file_id,file_type:'image'}));}
     let raw='';
     await bridge.request('/chat/completions',{method:'POST',body,stream:true,onChunk:chunk=>{if(raw.length+chunk.length>12*1024*1024)throw Error('이미지 생성 응답이 너무 큽니다.');raw+=chunk;},signal:controller?.signal});
-    const attachments=[];const seen=new Set();const parse=(value)=>{if(value===null||value===undefined)return;if(typeof value==='string'){const text=value.trim();if((text.startsWith('{')||text.startsWith('['))&&text.length<4*1024*1024){try{parse(JSON.parse(text));}catch{/* Ordinary SSE text. */}}return;}if(typeof value!=='object')return;if(Array.isArray(value)){for(const item of value)parse(item);return;}const id=value.file_id??value.fileId??value.attachment_id??value.attachmentId;if(/^[a-zA-Z0-9-]{1,200}$/.test(String(id||''))&&!seen.has(String(id))){seen.add(String(id));attachments.push({file_id:String(id),filename:typeof value.filename==='string'?value.filename:undefined,file_type:typeof value.file_type==='string'?value.file_type:'image',file_size:Number.isFinite(value.file_size)?value.file_size:undefined});}for(const [key,child] of Object.entries(value)){if(['file_id','fileId','attachment_id','attachmentId','filename','file_type','file_size'].includes(key))continue;parse(child);}};
-    const sse=new SSEParser(event=>parse(event));sse.push(raw);sse.end();if(!attachments.length)throw Error('학교 이미지 모델이 첨부 file_id를 반환하지 않았습니다. 모델 ID가 활성화되어 있는지 확인하세요.');
+    let conversationId='',messageId='';
+    const attachments=[];const seen=new Set();const parse=(value)=>{if(value===null||value===undefined)return;if(typeof value==='string'){const text=value.trim();if((text.startsWith('{')||text.startsWith('['))&&text.length<4*1024*1024){try{parse(JSON.parse(text));}catch{/* Ordinary SSE text. */}}return;}if(typeof value!=='object')return;if(Array.isArray(value)){for(const item of value)parse(item);return;}if(typeof value.conversation_id==='string')conversationId=value.conversation_id;if(typeof value.message_id==='string')messageId=value.message_id;const id=value.file_id??value.fileId??value.attachment_id??value.attachmentId;if(/^[a-zA-Z0-9-]{1,200}$/.test(String(id||''))&&!seen.has(String(id))){seen.add(String(id));attachments.push({file_id:String(id),filename:typeof value.filename==='string'?value.filename:undefined,file_type:typeof value.file_type==='string'?value.file_type:'image',file_size:Number.isFinite(value.file_size)?value.file_size:undefined});}for(const [key,child] of Object.entries(value)){if(['file_id','fileId','attachment_id','attachmentId','conversation_id','message_id','filename','file_type','file_size'].includes(key))continue;parse(child);}};
+    const sse=new SSEParser(event=>parse(event));sse.push(raw);sse.end();
+    // The chat API can finish the stream before the assistant message row has
+    // its attachment metadata. Recover it from the conversation rather than
+    // reporting a false image-generation failure. This is a read-only poll;
+    // it never starts another billed generation.
+    if(!attachments.length&&conversationId){
+      for(let attempt=0;attempt<4&&!attachments.length;attempt++){
+        if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+        try{
+          await ensureActive();
+          const result=await bridge.request(`/conversations/${encodeURIComponent(conversationId)}/messages`,{signal:controller?.signal});
+          const messages=Array.isArray(result)?result:Array.isArray(result?.items)?result.items:Array.isArray(result?.messages)?result.messages:[];
+          const candidates=messages.filter(item=>item&&item.role==='assistant'&&(!messageId||item.id===messageId)&&Array.isArray(item.attachments));
+          for(const item of candidates)for(const attachment of item.attachments){const normalized=normalizeAttachment(attachment,{imageHint:true});if(normalized&&!attachments.some(existing=>existing.file_id===normalized.file_id))attachments.push(normalized);}
+        }catch{/* Keep the original generation result as the source of truth. */}
+      }
+    }
+    if(!attachments.length)throw Error(`학교 이미지 모델이 첨부 file_id를 반환하지 않았습니다.${conversationId?' 대화 기록에도 이미지 첨부가 확인되지 않았습니다.':''}`);
     const attachment=attachments[0];return {generated:true,model_id:'gpt-image-2',attachment,file_id:attachment.file_id,filename:attachment.filename||`school-image-${attachment.file_id}.png`,file_type:'image'};
   }
   async function executeTool(job,isActive,ensureActive){
@@ -855,7 +898,7 @@ function activate(context){
     await context.secrets.store(key,token);relayRoot=project.path;const ctl=relayController=new AbortController();const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json','X-Worker-Id':randomUUID()};relaySession={url,headers};
     const call=async(route,body,timeout=30000)=>{const r=await fetch(url+route,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.any([ctl.signal,AbortSignal.timeout(timeout)])});if(!r.ok)throw Error(`중계 HTTP ${r.status}`);return r.json();};
      let heartbeatBusy=false;const heartbeat=setInterval(async()=>{if(heartbeatBusy||ctl.signal.aborted)return;heartbeatBusy=true;try{await call('/worker/heartbeat');relayConnected=true;relayError='';}catch(e){relayConnected=false;relayError=String(e.message||'중계 서버에 연결할 수 없습니다.').slice(0,200);}finally{heartbeatBusy=false;snapshot();}},10000);
-     (async()=>{try{await call('/worker/heartbeat');relayConnected=true;relayError='';mcpRegistry.upsert({id:'school-workspace',catalogId:'school-workspace',name:'학교 Workspace',description:'현재 프로젝트 Workspace Relay',kind:'relay',url,enabled:true,capabilities:['workspace','shell','unity']});await mcpRegistry.save();snapshot();while(!ctl.signal.aborted){try{const job=await call('/worker/poll');relayConnected=true;relayError='';snapshot();if(!job.id)continue;let result,error;
+     (async()=>{try{let connectedNow=false;for(let attempt=0;!connectedNow&&attempt<20&&!ctl.signal.aborted;attempt++){try{await call('/worker/heartbeat');connectedNow=true;}catch(error){const message=String(error?.message||error);if(!/중계 HTTP 409|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT/i.test(message)||attempt===19)throw error;await new Promise(resolve=>setTimeout(resolve,2000));}}if(!connectedNow)return;relayConnected=true;relayError='';mcpRegistry.upsert({id:'school-workspace',catalogId:'school-workspace',name:'학교 Workspace',description:'현재 프로젝트 Workspace Relay',kind:'relay',url,enabled:true,capabilities:['workspace','shell','unity']});await mcpRegistry.save();snapshot();while(!ctl.signal.aborted){try{const job=await call('/worker/poll');relayConnected=true;relayError='';snapshot();if(!job.id)continue;let result,error;
       const remoteExpiry=Number(job.expiresAt)||0;let deadline=Math.min(Date.now()+2*60*60*1000,remoteExpiry?remoteExpiry-5000:Date.now()+2*60*60*1000);let active=true;let expiry;const armExpiry=()=>{clearTimeout(expiry);expiry=setTimeout(()=>active=false,Math.max(0,deadline-Date.now()));};const check=()=>active&&!ctl.signal.aborted&&Date.now()<deadline;armExpiry();const keepalive=setInterval(async()=>{try{const status=await call('/worker/status',{id:job.id},15000);if(!status.active){active=false;return;}if(Number(status.expiresAt)>Date.now()){deadline=Math.min(Date.now()+2*60*60*1000,Number(status.expiresAt)-5000);armExpiry();}}catch{/* A transient keepalive failure does not cancel an active tool. */}},15000);
       const ensureActive=async()=>{if(!check())throw Error('요청 만료 — 변경하지 않았습니다.');const remote=await call('/worker/status',{id:job.id});if(!remote.active||!check())throw Error('중계 요청 만료');};
       try{result=await executeTool(job,check,ensureActive);if(!check())throw Error('요청 만료');}catch(e){error=e.message;}finally{clearTimeout(expiry);clearInterval(keepalive);}

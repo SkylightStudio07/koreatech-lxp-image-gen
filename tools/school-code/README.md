@@ -39,9 +39,9 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 - 학교 Workspace 도구에는 `path_info`와 `create_directory`가 포함됩니다. 없는 경로를 확인하는 것은 정상적인 읽기 결과이며, 경로가 없다고 폴더를 자동 생성하지 않습니다. 상대 경로의 새 폴더와 중첩 폴더만 만들 수 있고, 프로젝트 밖 경로·숨김/비밀 경로·심볼릭 링크·기존 파일은 거부합니다. 폴더 생성은 파일 수정과 같은 쓰기 승인으로 처리됩니다.
 - Git CLI 도구는 연결된 PC의 Git을 사용해 상태·diff·로그·브랜치를 읽고, 승인 후 선택 파일 stage·commit·fast-forward pull·push를 실행합니다. Git 인증 정보와 SSH 키는 NAS로 전송하지 않습니다.
 - `save_image_asset`은 학교 AI가 생성했거나 대화에 첨부한 이미지의 `file_id`를 연결된 프로젝트 안의 PNG/JPEG/WebP/GIF/SVG/ICO 파일로 저장합니다. 부모 폴더는 먼저 `create_directory`로 만들고, 저장·덮어쓰기 모두 승인 대상입니다. 이미지는 16 MiB 이하이며 SVG 안전성도 확인합니다.
-- `generate_image_asset`은 워크플로의 네이티브 이미지 도구가 노출되지 않을 때 로그인된 Chrome 세션의 학교 이미지 모델을 직접 호출해 `file_id`를 반환합니다. 반환된 ID를 `save_image_asset`에 넘기면 프로젝트에 저장됩니다. 생성은 학교 계정 할당량을 사용하며 별도 승인이 필요합니다.
+- `generate_image_asset`은 로그인된 Chrome 세션의 학교 이미지 모델을 직접 호출해 `file_id`를 반환합니다. `School Image Producer`를 선택하면 학교 Workflow API의 60초 제한을 피하기 위해 이 직접 경로를 우선 사용합니다. 반환된 ID를 `save_image_asset`에 넘기면 프로젝트에 저장됩니다. 생성은 학교 계정 할당량을 사용하며 별도 승인이 필요합니다.
 
-이미지 작업은 별도의 특수 문법을 입력하지 않습니다. Workspace MCP가 연결된 `School Image Producer` 에이전트를 선택하고 다음처럼 요청하면 됩니다.
+이미지 작업은 별도의 특수 문법을 입력하지 않습니다. `School Image Producer` 에이전트를 선택하고 다음처럼 요청하면 됩니다. 이 전용 경로는 이미지 생성 자체를 빠르게 처리하므로, 프로젝트·Notion 내용을 반영하려면 먼저 개발자 에이전트에서 지침을 읽고 결과를 프롬프트에 넣거나 참고 이미지를 함께 첨부하세요.
 
 ```text
 기획서와 아트 디렉션을 먼저 읽고 필요한 버튼 시안을 만들어줘.
@@ -50,7 +50,7 @@ School Code는 Codex·Claude Code처럼 프로젝트 전체를 처음부터 대�
 생성·저장 전에 각 승인 단계를 기다리고, 완료 후 실제 저장 경로와 이미지 크기를 보고해줘.
 ```
 
-`generate_image_asset`이 에이전트 도구 목록에 없으면 NAS 릴레이를 0.19.3으로 재빌드한 뒤 학교 리소스에서 MCP를 해제·재등록하고, 워크플로의 MCP 노드에서 `School Code Workspace`를 다시 선택해야 합니다.
+`generate_image_asset`이 에이전트 도구 목록에 없으면 NAS 릴레이를 최신 릴레이 소스로 재빌드한 뒤 학교 리소스에서 MCP를 해제·재등록하고, 워크플로의 MCP 노드에서 `School Code Workspace`를 다시 선택해야 합니다. 도구 목록에 있어도 워크플로가 60초에서 끊기면 VS Code에서 `School Image Producer`를 선택해 직접 경로를 사용하세요.
 - 중단 시 브라우저가 진행 중인 요청을 취소합니다. 이미 학교 서버에서 처리된 이용량까지 취소되는 것은 아닙니다. 자동 재전송하지 않습니다.
 - 대화는 VS Code의 해당 작업 영역 로컬 상태에 최근 100개 메시지까지 저장됩니다.
 - 학교 AI가 이미지 생성 결과를 첨부하면 Chrome의 로그인 탭에서 `/chat/uploads/{file_id}`를 받아 대화 안에 PNG/JPEG/WebP/GIF/SVG 미리보기로 표시합니다. 이미지 본문은 세션 저장소에 저장하지 않고 현재 확장 실행 중인 메모리에만 보관합니다.

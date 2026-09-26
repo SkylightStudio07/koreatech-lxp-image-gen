@@ -11,7 +11,7 @@ const {z}=require('zod');
 const {authorized,json,readJson}=require('./bridge.cjs');
 
 const {RelayAuthStore,encodeCookie,pairingPage}=require('./auth.cjs');
-const RELAY_VERSION='0.19.3';
+const RELAY_VERSION='0.19.5';
 
 
 

@@ -204,7 +204,7 @@ MCP 리소스 화면에 `연결 확인됨 · 도구 62개`가 보여도, 에이�
 반환된 file_id를 save_image_asset으로 Assets/Art/Shop/VertexButtons.png에 저장해줘.
 ```
 
-`generate_image_asset`이 목록에 없으면 NAS 릴레이를 0.19.3으로 재빌드하고 학교 리소스의 MCP를 해제 후 다시 등록한 다음, 워크플로 MCP 노드에서 `School Code Workspace`를 다시 선택합니다.
+`generate_image_asset`이 목록에 없으면 NAS 릴레이를 최신 릴레이 소스로 재빌드하고 학교 리소스의 MCP를 해제 후 다시 등록한 다음, 워크플로 MCP 노드에서 `School Code Workspace`를 다시 선택합니다. 도구가 목록에 있는데도 이미지 워크플로가 60초에서 끊기면 VS Code 0.19.7 이상에서 `School Image Producer`를 선택하세요. 이 확장은 해당 에이전트만 학교 Workflow API를 우회해 로그인된 Chrome 세션의 이미지 호출을 직접 실행합니다.
 5. **워크플로 저장**을 누른 뒤 에이전트 목록과 채팅 화면을 새로고침합니다.
 6. VS Code School Code의 **채팅** 탭에서 같은 에이전트를 선택하고 새 대화를 시작합니다.
 7. 먼저 `현재 연결된 프로젝트의 이름과 사용 가능한 도구를 알려줘`라고 테스트합니다.
